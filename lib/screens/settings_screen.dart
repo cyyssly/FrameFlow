@@ -35,7 +35,12 @@ class SettingsScreen extends StatelessWidget {
                 _buildRadioSetting(
                   context,
                   '播放顺序模式',
-                  [('顺序播放', PlayOrder.sequential), ('随机播放', PlayOrder.random)],
+                  [
+                    ('顺序播放', PlayOrder.sequential),
+                    ('随机播放', PlayOrder.random),
+                    ('由新到旧', PlayOrder.newestFirst),
+                    ('由旧到新', PlayOrder.oldestFirst),
+                  ],
                   settings.playOrder,
                   (value) => settings.setPlayOrder(value),
                 ),

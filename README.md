@@ -1,17 +1,175 @@
-# slide_show
+# Slide Show - 跨平台图片幻灯播放器
 
-A new Flutter project.
+一款基于 Flutter 开发的跨平台图片幻灯片播放器，支持 Windows、macOS、Linux、Android 和 iOS 平台。提供沉浸式的全屏图片浏览体验，支持多种播放模式、切换动画和丰富的自定义设置。
 
-## Getting Started
+## 功能特性
 
-This project is a starting point for a Flutter application.
+### 播放控制
+- **多种播放顺序** — 顺序播放（按文件名）、随机播放、由新到旧（按修改时间）、由旧到新（按修改时间）
+- **循环播放** — 可开启/关闭循环播放，播完即止
+- **自动播放** — 进入应用后自动扫描并开始播放幻灯片
+- **播放间隔可调** — 支持从 1 秒到 10 分钟多种间隔选项
+- **播放/暂停** — 随时控制播放进度
 
-A few resources to get you started if this is your first Flutter project:
+### 图片显示
+- **多种填充模式** — `适应窗口`（contain）或 `填满窗口`（cover）
+- **背景色选择** — 黑色、深灰、白色三种背景色
+- **屏幕方向控制** — 横屏、竖屏、跟随系统、跟随图片
+- **手势支持** — 双指缩放（最高 5 倍）、旋转、拖拽平移
+- **鼠标滚轮** — 可设置为切换图片或缩放图片
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### 切换动画
+- **淡入淡出** — 经典的交叉溶解过渡效果
+- **左右滑动** — 图片水平滑动切换
+- **上下滑动** — 图片垂直滑动切换
+- **无动画** — 直接切换，速度最快
+- **动画时长可调** — 0.1 秒至 1.0 秒
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 全屏模式
+- **真·全屏（Windows）** — 通过 Win32 API 实现真正的无边框全屏
+- **启动自动全屏** — 进入播放页自动切换全屏
+- **工具栏自动隐藏** — 无操作后自动隐藏控制栏，可自定义延迟时间
+- **暂停时保持工具栏** — 暂停播放时不隐藏控制栏
+
+### 多目录支持
+- **添加多个文件夹** — 支持同时添加多个图片目录
+- **递归扫描** — 可选择是否扫描子文件夹
+- **文件去重** — 自动按文件路径去重
+- **实时统计** — 显示每个文件夹的图片数量和子文件夹数量
+- **支持的格式** — JPG、JPEG、PNG、WebP、BMP、GIF、TIFF
+
+### 图片管理
+- **排除播放** — 将不喜欢的图片从播放列表中排除（不移除文件）
+- **实际删除** — 直接从磁盘删除图片（需二次确认）
+- **删除成功提示** — 全屏模式下也显示覆盖层提示
+
+### 信息显示
+- **图片信息** — 文件名、文件大小、分辨率、当前页码
+- **信息条自动隐藏** — 几秒无操作自动消失，可自定义延迟
+
+### 快捷键
+
+播放页面支持丰富的键盘快捷键操作：
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Space` | 播放/暂停 |
+| `←` / `↑` | 上一张 |
+| `→` / `↓` / `Page Down` | 下一张 |
+| `Home` | 第一张 |
+| `End` | 最后一张 |
+| `R` | 顺时针旋转 90° |
+| `F` / `F11` | 切换全屏 |
+| `Esc` | 退出全屏 |
+| `Delete` | 删除当前图片 |
+| `I` | 切换信息显示 |
+| `H` | 切换控制栏显示 |
+| `0-9` | 跳转到对应位置 |
+
+### 设置持久化
+
+所有设置自动保存，下次启动自动恢复。
+
+## 技术栈
+
+- **框架**: Flutter 3.x
+- **语言**: Dart ^3.12.2
+- **状态管理**: Provider
+- **本地存储**: SharedPreferences
+- **文件选择**: FilePicker
+- **图片处理**: image 库
+- **平台支持**: Windows (FFI)、macOS、Linux、Android、iOS
+
+## 快速开始
+
+### 环境要求
+
+- Flutter SDK >= 3.0
+- Dart SDK ^3.12.2
+
+### 安装与运行
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/cyyssly/FrameFlow.git
+cd slide_show
+
+# 2. 获取依赖
+flutter pub get
+
+# 3. 运行（调试模式）
+flutter run
+
+# 4. 构建发布版本
+# Windows
+flutter build windows
+
+# macOS
+flutter build macos
+
+# Linux
+flutter build linux
+
+# Android
+flutter build apk
+
+# iOS
+flutter build ios
+```
+
+> **Windows 用户**: 项目根目录提供了 `run_windows.bat` 和 `build_windows.bat` 便捷脚本，可直接双击运行。
+
+### 项目结构
+
+```
+slide_show/
+├── lib/
+│   ├── main.dart                     # 应用入口
+│   ├── models/
+│   │   └── image_item.dart           # 图片数据模型
+│   ├── providers/
+│   │   ├── slide_provider.dart       # 幻灯片状态管理
+│   │   └── settings_provider.dart    # 设置状态管理
+│   ├── screens/
+│   │   ├── home_screen.dart          # 主界面
+│   │   ├── player_screen.dart        # 播放界面
+│   │   ├── settings_screen.dart      # 设置界面
+│   │   └── folder_selection_screen.dart  # 目录选择界面
+│   └── widgets/
+│       └── image_grid.dart           # 图片网格组件
+├── android/                          # Android 平台配置
+├── ios/                              # iOS 平台配置
+├── windows/                          # Windows 平台配置
+├── web/                              # Web 平台配置
+├── test/                             # 测试文件
+├── pubspec.yaml                      # 项目配置
+├── analysis_options.yaml             # 代码分析配置
+└── README.md
+```
+
+## 配置说明
+
+所有设置项通过 `shared_preferences` 持久化到本地，无需数据库。
+
+### 主要配置分类
+
+| 分类 | 说明 |
+|------|------|
+| 播放基础设置 | 轮播间隔、播放顺序（顺序/随机/由新到旧/由旧到新）、循环播放、自动播放 |
+| 图片显示设置 | 填充模式、背景底色、屏幕方向 |
+| 切换动画 | 动画类型、动画时长 |
+| 窗口/全屏控制 | 自动全屏、工具栏隐藏、隐藏延迟 |
+| 文件与目录 | 递归扫描子文件夹 |
+| 信息显示设置 | 图片信息显示、自动隐藏 |
+| 快捷键与控制 | 滚轮行为、删除行为 |
+
+## 关于作者
+
+- **GitHub**: [cyyssly](https://github.com/cyyssly)
+- **爱发电**: [sly345678](https://ifdian.net/a/sly345678/plan)
+
+如果你觉得这个项目有帮助，欢迎[赞助支持](https://ifdian.net/a/sly345678/plan) ❤️
+
+## 许可证
+
+本项目基于 MIT 许可证开源，详见 `LICENSE` 文件。

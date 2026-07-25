@@ -389,8 +389,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     if (!settings.loopPlay) {
-      // 顺序播放时，检查是否到达最后一张图片
-      if (settings.playOrder == PlayOrder.sequential &&
+      // 顺序/最新/最旧模式：检查是否到达最后一张图片
+      final isSequentialOrder =
+          settings.playOrder == PlayOrder.sequential ||
+          settings.playOrder == PlayOrder.newestFirst ||
+          settings.playOrder == PlayOrder.oldestFirst;
+      if (isSequentialOrder &&
           slideProvider.currentIndex == slideProvider.images.length - 1) {
         slideProvider.togglePlay();
         _autoPlayTimer?.cancel();
@@ -422,6 +426,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // 使用预打乱的随机序列进行播放
       slideProvider.nextRandomImage();
     } else {
+      // 顺序/最新优先/最旧优先统一使用顺序索引播放
       slideProvider.nextImage();
     }
   }

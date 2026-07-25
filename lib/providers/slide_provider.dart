@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:slide_show/models/image_item.dart';
+import 'package:slide_show/providers/settings_provider.dart';
 
 class SlideProvider extends ChangeNotifier {
   List<ImageItem> _images = [];
@@ -154,6 +156,148 @@ class SlideProvider extends ChangeNotifier {
   }
 
   void shuffleImages() {
+    _randomOrder = List.generate(_images.length, (i) => i)..shuffle();
+    notifyListeners();
+  }
+
+  /// 增量添加新图片（边扫描边播放时使用）
+  /// 按排序顺序插入到正确位置，保证列表始终有序，不重置当前索引
+  void addNewImages(List<ImageItem> newImages, PlayOrder order) {
+    int addedCount = 0;
+    for (final image in newImages) {
+      if (_images.any((existing) => existing.path == image.path)) continue;
+
+      int insertIndex;
+      switch (order) {
+        case PlayOrder.sequential:
+          insertIndex = _findInsertIndexByName(image.name);
+          break;
+        case PlayOrder.newestFirst:
+          insertIndex = _findInsertIndexByTime(image.path, newestFirst: true);
+          break;
+        case PlayOrder.oldestFirst:
+          insertIndex = _findInsertIndexByTime(image.path, newestFirst: false);
+          break;
+        case PlayOrder.random:
+          insertIndex = _images.length;
+          break;
+      }
+
+      _images.insert(insertIndex, image);
+
+      // 插入位置在当前索引之前或当前位置 → 当前索引后移
+      if (insertIndex <= _currentIndex) {
+        _currentIndex++;
+      }
+
+      // 更新随机序列
+      _randomOrder.add(_randomOrder.length); // 先加一个占位
+      // 调整已有索引：插入点之后的索引 +1
+      for (int i = 0; i < _randomOrder.length - 1; i++) {
+        if (_randomOrder[i] >= insertIndex) {
+          _randomOrder[i]++;
+        }
+      }
+      // 新索引随机插入到随机序列中
+      final randomPos =
+          DateTime.now().microsecondsSinceEpoch % (_randomOrder.length);
+      _randomOrder[randomPos] = insertIndex;
+      // 如果新索引插入位置不在末尾，把末尾占位移过去
+      if (randomPos < _randomOrder.length - 1) {
+        _randomOrder[_randomOrder.length - 1] = _randomOrder[randomPos];
+        _randomOrder[randomPos] = insertIndex;
+      }
+
+      addedCount++;
+    }
+
+    if (addedCount > 0) {
+      notifyListeners();
+    }
+  }
+
+  /// 二分查找按文件名的插入位置（列表已按文件名升序排列）
+  int _findInsertIndexByName(String name) {
+    int low = 0, high = _images.length;
+    while (low < high) {
+      final mid = (low + high) ~/ 2;
+      if (_images[mid].name.compareTo(name) < 0) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }
+
+  /// 二分查找按修改时间的插入位置
+  /// [newestFirst] = true: 从新到旧（降序），false: 从旧到新（升序）
+  int _findInsertIndexByTime(String imagePath, {required bool newestFirst}) {
+    DateTime? newTime;
+    try {
+      newTime = File(imagePath).lastModifiedSync();
+    } catch (_) {
+      return _images.length; // 无法获取时间，放到末尾
+    }
+
+    int low = 0, high = _images.length;
+    while (low < high) {
+      final mid = (low + high) ~/ 2;
+      DateTime? midTime;
+      try {
+        midTime = File(_images[mid].path).lastModifiedSync();
+      } catch (_) {
+        midTime = newestFirst ? DateTime(0) : DateTime(9999);
+      }
+
+      final cmp = midTime.compareTo(newTime);
+      // newestFirst: 降序（新→旧），所以 new > mid 时靠前
+      final adjusted = newestFirst ? -cmp : cmp;
+      if (adjusted < 0) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }
+
+  /// 根据播放顺序模式对图片列表进行排序
+  void sortByPlayOrder(PlayOrder order) {
+    switch (order) {
+      case PlayOrder.sequential:
+        // 按文件名排序（默认）
+        _images.sort((a, b) => a.name.compareTo(b.name));
+        break;
+      case PlayOrder.newestFirst:
+        // 按文件修改时间从新到旧
+        _images.sort((a, b) {
+          try {
+            final aTime = File(a.path).lastModifiedSync();
+            final bTime = File(b.path).lastModifiedSync();
+            return bTime.compareTo(aTime);
+          } catch (_) {
+            return 0;
+          }
+        });
+        break;
+      case PlayOrder.oldestFirst:
+        // 按文件修改时间从旧到新
+        _images.sort((a, b) {
+          try {
+            final aTime = File(a.path).lastModifiedSync();
+            final bTime = File(b.path).lastModifiedSync();
+            return aTime.compareTo(bTime);
+          } catch (_) {
+            return 0;
+          }
+        });
+        break;
+      case PlayOrder.random:
+        // 随机模式不排序图片本身，使用 `_randomOrder` 序列
+        break;
+    }
+    _currentIndex = 0;
     _randomOrder = List.generate(_images.length, (i) => i)..shuffle();
     notifyListeners();
   }

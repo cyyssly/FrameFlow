@@ -59,7 +59,14 @@ class _HomeScreenState extends State<HomeScreen> {
           if (now.difference(lastUpdateTime) >= updateInterval) {
             final newImages = uniqueImages.values.toList()
               ..sort((a, b) => a.name.compareTo(b.name));
-            slideProvider.setImages(newImages);
+            if (hasStartedPlaying) {
+              // 已开始播放：按排序顺序增量插入新图片，不重置当前位置
+              slideProvider.addNewImages(newImages, settingsProvider.playOrder);
+            } else {
+              // 未开始播放：全量替换，方便后续启动
+              slideProvider.setImages(newImages);
+              slideProvider.sortByPlayOrder(settingsProvider.playOrder);
+            }
             lastUpdateTime = now;
           }
         }
@@ -71,33 +78,39 @@ class _HomeScreenState extends State<HomeScreen> {
           await _startPlaybackEarly(
             uniqueImages.values.toList(),
             slideProvider,
+            settingsProvider,
           );
           hasStartedPlaying = true;
         }
       }
 
-      // 按文件名排序
-      final sortedImages = uniqueImages.values.toList()
+      // 所有文件夹扫描完毕
+      final allImages = uniqueImages.values.toList()
         ..sort((a, b) => a.name.compareTo(b.name));
 
-      if (sortedImages.isEmpty) {
+      if (allImages.isEmpty) {
         setState(() {
           _isAutoScanning = false;
         });
         return;
       }
 
-      // 设置图片列表（无论是否自动播放都要设置）
-      slideProvider.setImages(sortedImages);
+      if (hasStartedPlaying) {
+        // 已开始播放：按排序顺序增量添加剩余新图片，不重置当前位置
+        slideProvider.addNewImages(allImages, settingsProvider.playOrder);
+      } else {
+        // 未开始播放：全量设置并排序，准备启动
+        slideProvider.setImages(allImages);
+        slideProvider.sortByPlayOrder(settingsProvider.playOrder);
 
-      if (!hasStartedPlaying && settingsProvider.autoPlay) {
-        // 如果开启了自动播放且还未开始，启动播放
-        await Future.delayed(const Duration(milliseconds: 500));
+        if (settingsProvider.autoPlay) {
+          await Future.delayed(const Duration(milliseconds: 500));
 
-        slideProvider.goToImage(0);
-        slideProvider.togglePlay();
-        if (mounted) {
-          Navigator.pushNamed(context, '/player');
+          slideProvider.goToImage(0);
+          slideProvider.togglePlay();
+          if (mounted) {
+            Navigator.pushNamed(context, '/player');
+          }
         }
       }
     } catch (e) {
@@ -114,12 +127,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _startPlaybackEarly(
     List<ImageItem> images,
     SlideProvider slideProvider,
+    SettingsProvider settingsProvider,
   ) async {
     // 对已收集的图片进行排序
     final sortedImages = images.toList()
       ..sort((a, b) => a.name.compareTo(b.name));
 
     slideProvider.setImages(sortedImages);
+    slideProvider.sortByPlayOrder(settingsProvider.playOrder);
 
     await Future.delayed(const Duration(milliseconds: 300));
 
@@ -229,6 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       slideProvider.setImages(sortedImages);
+      slideProvider.sortByPlayOrder(settingsProvider.playOrder);
 
       slideProvider.goToImage(0);
       slideProvider.togglePlay();

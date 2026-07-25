@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum PlayOrder { sequential, random }
+enum PlayOrder { sequential, random, newestFirst, oldestFirst }
 
 enum ImageFitMode { contain, cover }
 
