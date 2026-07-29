@@ -6,6 +6,7 @@ import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/screens/folder_selection_screen.dart';
+import 'package:slide_show/l10n/app_localizations.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -45,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
       bool hasStartedPlaying = false;
       DateTime lastUpdateTime = DateTime.now();
       const updateInterval = Duration(milliseconds: 300);
+      final bool isRandomMode = settingsProvider.playOrder == PlayOrder.random;
 
       // 逐个扫描文件夹
       for (final folderPath in slideProvider.folderPaths) {
@@ -54,25 +56,32 @@ class _HomeScreenState extends State<HomeScreen> {
             uniqueImages[image.path] = image;
           }
 
-          // 时间节流：每隔300ms更新一次列表，避免频繁UI更新
-          final now = DateTime.now();
-          if (now.difference(lastUpdateTime) >= updateInterval) {
-            final newImages = uniqueImages.values.toList()
-              ..sort((a, b) => a.name.compareTo(b.name));
-            if (hasStartedPlaying) {
-              // 已开始播放：按排序顺序增量插入新图片，不重置当前位置
-              slideProvider.addNewImages(newImages, settingsProvider.playOrder);
-            } else {
-              // 未开始播放：全量替换，方便后续启动
-              slideProvider.setImages(newImages);
-              slideProvider.sortByPlayOrder(settingsProvider.playOrder);
+          // 随机模式：边扫描边播放，每隔300ms增量更新列表
+          if (isRandomMode) {
+            final now = DateTime.now();
+            if (now.difference(lastUpdateTime) >= updateInterval) {
+              final newImages = uniqueImages.values.toList()
+                ..sort((a, b) => a.name.compareTo(b.name));
+              if (hasStartedPlaying) {
+                slideProvider.addNewImages(
+                  newImages,
+                  settingsProvider.playOrder,
+                );
+              } else {
+                slideProvider.setImages(
+                  newImages,
+                  playOrder: settingsProvider.playOrder,
+                );
+                slideProvider.sortByPlayOrder(settingsProvider.playOrder);
+              }
+              lastUpdateTime = now;
             }
-            lastUpdateTime = now;
           }
         }
 
-        // 如果开启了自动播放，且已经收集到足够的图片且还未开始播放，则立即开始
-        if (settingsProvider.autoPlay &&
+        // 随机模式：收集到>=10张且未开始播放 → 提前开始（仅随机模式）
+        if (isRandomMode &&
+            settingsProvider.autoPlay &&
             !hasStartedPlaying &&
             uniqueImages.length >= 10) {
           await _startPlaybackEarly(
@@ -96,17 +105,20 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       if (hasStartedPlaying) {
-        // 已开始播放：按排序顺序增量添加剩余新图片，不重置当前位置
+        // 随机模式已提前播放：增量添加剩余新图片
         slideProvider.addNewImages(allImages, settingsProvider.playOrder);
       } else {
-        // 未开始播放：全量设置并排序，准备启动
-        slideProvider.setImages(allImages);
+        // 非随机模式（或图片不足10张）：全量设置并排序后开始播放
+        slideProvider.setImages(
+          allImages,
+          playOrder: settingsProvider.playOrder,
+        );
         slideProvider.sortByPlayOrder(settingsProvider.playOrder);
 
         if (settingsProvider.autoPlay) {
           await Future.delayed(const Duration(milliseconds: 500));
 
-          slideProvider.goToImage(0);
+          slideProvider.goToStartPosition(settingsProvider.playOrder);
           slideProvider.togglePlay();
           if (mounted) {
             Navigator.pushNamed(context, '/player');
@@ -133,12 +145,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final sortedImages = images.toList()
       ..sort((a, b) => a.name.compareTo(b.name));
 
-    slideProvider.setImages(sortedImages);
+    slideProvider.setImages(
+      sortedImages,
+      playOrder: settingsProvider.playOrder,
+    );
     slideProvider.sortByPlayOrder(settingsProvider.playOrder);
 
     await Future.delayed(const Duration(milliseconds: 300));
 
-    slideProvider.goToImage(0);
+    slideProvider.goToStartPosition(settingsProvider.playOrder);
     slideProvider.togglePlay();
     if (mounted) {
       Navigator.pushNamed(context, '/player');
@@ -243,10 +258,13 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      slideProvider.setImages(sortedImages);
+      slideProvider.setImages(
+        sortedImages,
+        playOrder: settingsProvider.playOrder,
+      );
       slideProvider.sortByPlayOrder(settingsProvider.playOrder);
 
-      slideProvider.goToImage(0);
+      slideProvider.goToStartPosition(settingsProvider.playOrder);
       slideProvider.togglePlay();
       if (mounted) {
         Navigator.pushNamed(context, '/player');
@@ -285,9 +303,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isAndroid = Platform.isAndroid;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('图片幻灯播放器'),
+        title: Text(AppLocalizations.of(context).homeTitle),
         centerTitle: true,
         backgroundColor: const Color(0xFF16213e),
         elevation: 0,
@@ -299,9 +319,9 @@ class _HomeScreenState extends State<HomeScreen> {
             if (_isAutoScanning) ...[
               const CircularProgressIndicator(),
               const SizedBox(height: 16),
-              const Text(
-                '正在扫描图片...',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
+              Text(
+                AppLocalizations.of(context).scanning,
+                style: const TextStyle(fontSize: 16, color: Colors.grey),
               ),
             ] else ...[
               SizedBox(
@@ -321,12 +341,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     elevation: 4,
                     shadowColor: const Color(0xFF00b894).withValues(alpha: 0.4),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.play_circle, size: 24),
-                      SizedBox(width: 12),
-                      Text('开始播放', style: TextStyle(fontSize: 18)),
+                      const Icon(Icons.play_circle, size: 24),
+                      const SizedBox(width: 12),
+                      Text(
+                        AppLocalizations.of(context).startPlay,
+                        style: const TextStyle(fontSize: 18),
+                      ),
                     ],
                   ),
                 ),
@@ -334,30 +357,65 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 12),
               SizedBox(
                 width: MediaQuery.of(context).size.width * 0.5,
-                child: ElevatedButton(
-                  onPressed: () => _selectFolder(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0984e3),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 3,
-                    shadowColor: const Color(0xFF0984e3).withValues(alpha: 0.3),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.folder_open, size: 24),
-                      SizedBox(width: 12),
-                      Text('选择图片', style: TextStyle(fontSize: 18)),
-                    ],
-                  ),
-                ),
+                child: isAndroid
+                    ? ElevatedButton(
+                        onPressed: () => _selectFolder(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0984e3),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 16,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 3,
+                          shadowColor: const Color(
+                            0xFF0984e3,
+                          ).withValues(alpha: 0.3),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.photo_library, size: 24),
+                            const SizedBox(width: 12),
+                            Text(
+                              AppLocalizations.of(context).selectAlbum,
+                              style: const TextStyle(fontSize: 18),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ElevatedButton(
+                        onPressed: () => _selectFolder(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0984e3),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 16,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 3,
+                          shadowColor: const Color(
+                            0xFF0984e3,
+                          ).withValues(alpha: 0.3),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.folder_open, size: 24),
+                            const SizedBox(width: 12),
+                            Text(
+                              AppLocalizations.of(context).selectFolder,
+                              style: const TextStyle(fontSize: 18),
+                            ),
+                          ],
+                        ),
+                      ),
               ),
               const SizedBox(height: 12),
               SizedBox(
@@ -377,12 +435,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     elevation: 3,
                     shadowColor: const Color(0xFF6c5ce7).withValues(alpha: 0.3),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.settings, size: 24),
-                      SizedBox(width: 12),
-                      Text('设置', style: TextStyle(fontSize: 18)),
+                      const Icon(Icons.settings, size: 24),
+                      const SizedBox(width: 12),
+                      Text(
+                        AppLocalizations.of(context).settings,
+                        style: const TextStyle(fontSize: 18),
+                      ),
                     ],
                   ),
                 ),
@@ -405,14 +466,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     elevation: 3,
                     shadowColor: const Color(0xFFe17055).withValues(alpha: 0.3),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.favorite, size: 24),
-                      SizedBox(width: 12),
-                      Text('赞助', style: TextStyle(fontSize: 18)),
+                      const Icon(Icons.favorite, size: 24),
+                      const SizedBox(width: 12),
+                      Text(
+                        AppLocalizations.of(context).sponsor,
+                        style: const TextStyle(fontSize: 18),
+                      ),
                     ],
                   ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'v1.1.0',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.white.withValues(alpha: 0.3),
                 ),
               ),
             ],

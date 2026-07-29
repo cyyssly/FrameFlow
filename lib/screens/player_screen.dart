@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
@@ -134,7 +134,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
                 int Function(Pointer<Utf16>, Pointer<Utf16>)
               >('FindWindowW');
-          hwnd = findWindowW(nullptr, '图片幻灯播放器'.toNativeUtf16());
+          hwnd = findWindowW(nullptr, 'FrameFlow'.toNativeUtf16());
         }
 
         if (hwnd != 0) {
@@ -539,7 +539,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
                 int Function(Pointer<Utf16>, Pointer<Utf16>)
               >('FindWindowW');
-          hwnd = findWindowW(nullptr, '图片幻灯播放器'.toNativeUtf16());
+          hwnd = findWindowW(nullptr, 'FrameFlow'.toNativeUtf16());
         }
 
         // 如果仍然获取不到窗口句柄，直接返回
@@ -652,7 +652,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
                 int Function(Pointer<Utf16>, Pointer<Utf16>)
               >('FindWindowW');
-          hwnd = findWindowW(nullptr, '图片幻灯播放器'.toNativeUtf16());
+          hwnd = findWindowW(nullptr, 'FrameFlow'.toNativeUtf16());
         }
 
         // 如果仍然获取不到窗口句柄，直接返回
@@ -876,13 +876,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (event is PointerScrollEvent) {
       final settings = Provider.of<SettingsProvider>(context, listen: false);
       if (settings.wheelSwitchImage) {
-        // 滚轮切换图片
+        // 滚轮切换图片（不触发工具栏显示）
         if (event.scrollDelta.dy > 0) {
           _nextImage();
         } else if (event.scrollDelta.dy < 0) {
           Provider.of<SlideProvider>(context, listen: false).prevImage();
         }
-        _showControlsTemporarily();
       } else {
         // 滚轮缩放图片
         setState(() {
@@ -1120,11 +1119,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 },
                 onHorizontalDragEnd: (details) {
                   if (details.primaryVelocity! > 50) {
-                    slideProvider.prevImage();
-                    _showControlsTemporarily();
+                    slideProvider.prevImage(playOrder: settings.playOrder);
                   } else if (details.primaryVelocity! < -50) {
                     _nextImage();
-                    _showControlsTemporarily();
                   }
                 },
                 onScaleStart: _handleScaleStart,

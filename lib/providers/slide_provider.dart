@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/settings_provider.dart';
@@ -18,10 +19,12 @@ class SlideProvider extends ChangeNotifier {
   String get folderPath => _folderPaths.isNotEmpty ? _folderPaths.first : '';
   List<String> get folderPaths => _folderPaths;
 
-  void setImages(List<ImageItem> images) {
+  void setImages(List<ImageItem> images, {PlayOrder? playOrder}) {
     _images = images;
-    _currentIndex = 0;
     _randomOrder = List.generate(images.length, (i) => i)..shuffle();
+    _currentIndex = (playOrder == PlayOrder.random && _randomOrder.isNotEmpty)
+        ? _randomOrder[0]
+        : 0;
     notifyListeners();
   }
 
@@ -96,9 +99,32 @@ class SlideProvider extends ChangeNotifier {
     return currentPos == _randomOrder.length - 1;
   }
 
-  void prevImage() {
+  void prevImage({PlayOrder? playOrder}) {
     if (_images.isEmpty) return;
-    _currentIndex = (_currentIndex - 1 + _images.length) % _images.length;
+
+    if (playOrder == PlayOrder.random && _randomOrder.isNotEmpty) {
+      // 随机模式：回溯预打乱的随机序列
+      final currentPos = _randomOrder.indexOf(_currentIndex);
+      if (currentPos > 0) {
+        _currentIndex = _randomOrder[currentPos - 1];
+      } else {
+        // 当前是随机序列的第一个，回到最后一个
+        _currentIndex = _randomOrder[_randomOrder.length - 1];
+      }
+    } else {
+      // 顺序模式：正常递减
+      _currentIndex = (_currentIndex - 1 + _images.length) % _images.length;
+    }
+    notifyListeners();
+  }
+
+  void goToStartPosition(PlayOrder playOrder) {
+    if (_images.isEmpty) return;
+    if (playOrder == PlayOrder.random && _randomOrder.isNotEmpty) {
+      _currentIndex = _randomOrder[0];
+    } else {
+      _currentIndex = 0;
+    }
     notifyListeners();
   }
 
@@ -179,6 +205,9 @@ class SlideProvider extends ChangeNotifier {
           insertIndex = _findInsertIndexByTime(image.path, newestFirst: false);
           break;
         case PlayOrder.random:
+          insertIndex = _images.length;
+          break;
+        case PlayOrder.newPreferred:
           insertIndex = _images.length;
           break;
       }
@@ -295,6 +324,36 @@ class SlideProvider extends ChangeNotifier {
         break;
       case PlayOrder.random:
         // 随机模式不排序图片本身，使用 `_randomOrder` 序列
+        break;
+      case PlayOrder.newPreferred:
+        // 新图优先：加权随机重排，新图有更高概率放在前面
+        // 1. 先按修改时间从新到旧排序
+        _images.sort((a, b) {
+          try {
+            final aTime = File(a.path).lastModifiedSync();
+            final bTime = File(b.path).lastModifiedSync();
+            return bTime.compareTo(aTime);
+          } catch (_) {
+            return 0;
+          }
+        });
+        // 2. 加权随机打乱：越新的图偏移越小，保留靠前位置
+        final rng = Random();
+        for (int i = 0; i < _images.length; i++) {
+          final progress = i / _images.length; // 0~1
+          // 偏移范围：前部30% → 后部90%，逐步增大
+          final rangeRatio = 0.3 + progress * 0.6;
+          final maxOffset = (_images.length * rangeRatio).ceil().clamp(
+            1,
+            _images.length - i,
+          );
+          final j = i + rng.nextInt(maxOffset);
+          if (j < _images.length) {
+            final temp = _images[i];
+            _images[i] = _images[j];
+            _images[j] = temp;
+          }
+        }
         break;
     }
     _currentIndex = 0;

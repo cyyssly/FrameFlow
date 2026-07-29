@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 读取图片权限（Android 13+） -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- 读取存储权限（Android 12 及以下） -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <application
-        android:label="slide_show"
+        android:label="FrameFlow"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

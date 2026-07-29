@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/models/image_item.dart';
+import 'package:slide_show/screens/excluded_images_screen.dart';
+import 'package:slide_show/l10n/app_localizations.dart';
 
 class FolderSelectionScreen extends StatefulWidget {
   const FolderSelectionScreen({super.key});
@@ -179,6 +181,31 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       _folderStats.clear();
       _scanningFolders.clear();
     });
+  }
+
+  /// 构建"已排除的文件"虚拟文件夹条目
+  Widget _buildExcludedFolderTile() {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    final excludedCount = settings.excludedPaths.length;
+    final loc = AppLocalizations.of(context);
+    return ListTile(
+      leading: const Icon(Icons.inbox, color: Colors.orange),
+      title: Text(
+        loc.excludeFolderVirtual,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+      ),
+      subtitle: Text(
+        excludedCount > 0 ? '包含 $excludedCount 张图片' : '暂无已排除的图片',
+        style: const TextStyle(fontSize: 12, color: Colors.grey),
+      ),
+      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const ExcludedImagesScreen()),
+        );
+      },
+    );
   }
 
   Future<void> _scanImages() async {
@@ -407,56 +434,46 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         centerTitle: true,
         backgroundColor: const Color(0xFF16213e),
       ),
-      body: Consumer<SlideProvider>(
-        builder: (context, slideProvider, child) => Padding(
+      body: Consumer2<SlideProvider, SettingsProvider>(
+        builder: (context, slideProvider, settingsProvider, child) => Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
               // 已选文件夹列表
               Expanded(
-                child: slideProvider.folderPaths.isEmpty
-                    ? const Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.folder_open,
-                              size: 64,
-                              color: Colors.grey,
-                            ),
-                            SizedBox(height: 16),
-                            Text(
-                              '请添加文件夹',
-                              style: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: slideProvider.folderPaths.length,
-                        itemBuilder: (context, index) {
-                          final path = slideProvider.folderPaths[index];
-                          return ListTile(
-                            leading: const Icon(
-                              Icons.folder,
-                              color: Colors.blue,
-                            ),
-                            title: Text(
-                              path,
-                              style: const TextStyle(fontSize: 14),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: _buildFolderStats(path),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () => _removeFolder(path),
-                            ),
-                          );
-                        },
+                child: ListView.builder(
+                  itemCount:
+                      slideProvider.folderPaths.length +
+                      (settingsProvider.excludedPaths.isNotEmpty ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    final hasExcluded =
+                        settingsProvider.excludedPaths.isNotEmpty;
+                    // 第一个条目（如果有排除文件）是虚拟的"已排除的文件"文件夹
+                    if (hasExcluded && index == 0) {
+                      return Column(
+                        children: [
+                          _buildExcludedFolderTile(),
+                          const Divider(height: 1, color: Colors.grey),
+                        ],
+                      );
+                    }
+                    final folderIndex = hasExcluded ? index - 1 : index;
+                    final path = slideProvider.folderPaths[folderIndex];
+                    return ListTile(
+                      leading: const Icon(Icons.folder, color: Colors.blue),
+                      title: Text(
+                        path,
+                        style: const TextStyle(fontSize: 14),
+                        overflow: TextOverflow.ellipsis,
                       ),
+                      subtitle: _buildFolderStats(path),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _removeFolder(path),
+                      ),
+                    );
+                  },
+                ),
               ),
               // 操作按钮
               const SizedBox(height: 16),
@@ -477,12 +494,15 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                           0xFF0984e3,
                         ).withValues(alpha: 0.3),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.add, size: 24),
-                          SizedBox(width: 12),
-                          Text('添加文件夹', style: TextStyle(fontSize: 18)),
+                          const Icon(Icons.add, size: 24),
+                          const SizedBox(width: 12),
+                          Text(
+                            AppLocalizations.of(context).addFolder,
+                            style: const TextStyle(fontSize: 18),
+                          ),
                         ],
                       ),
                     ),
@@ -505,12 +525,15 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                           0xFFd63031,
                         ).withValues(alpha: 0.3),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.clear, size: 24),
-                          SizedBox(width: 12),
-                          Text('清空全部', style: TextStyle(fontSize: 18)),
+                          const Icon(Icons.clear, size: 24),
+                          const SizedBox(width: 12),
+                          Text(
+                            AppLocalizations.of(context).clearAll,
+                            style: const TextStyle(fontSize: 18),
+                          ),
                         ],
                       ),
                     ),
@@ -534,12 +557,15 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                   ),
                   child: _isScanning
                       ? const CircularProgressIndicator(color: Colors.white)
-                      : const Row(
+                      : Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.play_circle, size: 24),
-                            SizedBox(width: 12),
-                            Text('开始播放', style: TextStyle(fontSize: 18)),
+                            const Icon(Icons.play_circle, size: 24),
+                            const SizedBox(width: 12),
+                            Text(
+                              AppLocalizations.of(context).startPlay,
+                              style: const TextStyle(fontSize: 18),
+                            ),
                           ],
                         ),
                 ),

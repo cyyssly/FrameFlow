@@ -1,7 +1,7 @@
 name: slide_show
 description: "A cross-platform image slideshow application."
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+1
 
 environment:
   sdk: ^3.12.2
@@ -9,8 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   cupertino_icons: ^1.0.8
-  file_picker: ^6.1.1
+  file_picker: ^8.3.7
   shared_preferences: ^2.2.2
   provider: ^6.1.1
   image: ^4.1.7
@@ -20,6 +22,20 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  windows:
+    generate: true
+  image_path: "assets/icon/app_icon.png"
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icon/
+  fonts:
+    - family: NotoSansSC
+      fonts:
+        - asset: assets/fonts/NotoSansSC-Regular.ttf

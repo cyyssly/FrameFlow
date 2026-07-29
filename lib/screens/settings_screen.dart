@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
+import 'package:slide_show/l10n/app_localizations.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -9,7 +10,7 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('设置'),
+        title: Text(AppLocalizations.of(context).settingsTitle),
         centerTitle: true,
         backgroundColor: const Color(0xFF16213e),
         elevation: 0,
@@ -21,25 +22,58 @@ class SettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // 语言设置
+          _buildSectionTitle(AppLocalizations.of(context).languageLabel),
+          Consumer<SettingsProvider>(
+            builder: (context, settings, child) => _buildRadioSetting(
+              context,
+              AppLocalizations.of(context).languageLabel,
+              [
+                (AppLocalizations.of(context).systemLang, 0),
+                ('简体中文', 1),
+                ('English', 2),
+                ('繁體中文', 3),
+              ],
+              settings.languageIndex,
+              (value) => settings.setLanguageIndex(value),
+            ),
+          ),
+          const SizedBox(height: 8),
           // 播放基础设置
-          _buildSectionTitle('播放基础设置'),
+          _buildSectionTitle(AppLocalizations.of(context).playOrderMode),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildIntervalSetting(
                   context,
                   '轮播间隔时间',
                   settings.interval,
+                  settings.customInterval,
                   (value) => settings.setInterval(value),
+                  (value) => settings.setCustomInterval(value),
                 ),
                 _buildRadioSetting(
                   context,
-                  '播放顺序模式',
+                  AppLocalizations.of(context).playOrderMode,
                   [
-                    ('顺序播放', PlayOrder.sequential),
-                    ('随机播放', PlayOrder.random),
-                    ('由新到旧', PlayOrder.newestFirst),
-                    ('由旧到新', PlayOrder.oldestFirst),
+                    (
+                      AppLocalizations.of(context).sequential,
+                      PlayOrder.sequential,
+                    ),
+                    (AppLocalizations.of(context).randomPlay, PlayOrder.random),
+                    (
+                      AppLocalizations.of(context).newestFirst,
+                      PlayOrder.newestFirst,
+                    ),
+                    (
+                      AppLocalizations.of(context).oldestFirst,
+                      PlayOrder.oldestFirst,
+                    ),
+                    (
+                      AppLocalizations.of(context).newPreferred,
+                      PlayOrder.newPreferred,
+                    ),
                   ],
                   settings.playOrder,
                   (value) => settings.setPlayOrder(value),
@@ -47,7 +81,7 @@ class SettingsScreen extends StatelessWidget {
                 _buildSwitchSetting(
                   context,
                   '循环播放',
-                  '关闭：播放到最后一张停止；开启：首尾循环',
+                  AppLocalizations.of(context).loopPlayDesc,
                   settings.loopPlay,
                   (value) => settings.setLoopPlay(value),
                 ),
@@ -64,39 +98,61 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 24),
 
           // 图片显示设置
-          _buildSectionTitle('图片显示设置'),
+          _buildSectionTitle(AppLocalizations.of(context).imageDisplay),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
                 _buildRadioSetting(
                   context,
-                  '图片填充模式',
+                  AppLocalizations.of(context).fitMode,
                   [
-                    ('适应窗口', ImageFitMode.contain),
-                    ('填满窗口', ImageFitMode.cover),
+                    (
+                      AppLocalizations.of(context).contain,
+                      ImageFitMode.contain,
+                    ),
+                    (AppLocalizations.of(context).cover, ImageFitMode.cover),
+                    (
+                      AppLocalizations.of(context).original,
+                      ImageFitMode.original,
+                    ),
                   ],
                   settings.imageFitMode,
                   (value) => settings.setImageFitMode(value),
                 ),
                 _buildRadioSetting(
                   context,
-                  '背景底色',
+                  AppLocalizations.of(context).backgroundColorLabel,
                   [
-                    ('黑色', BackgroundColor.black),
-                    ('深灰', BackgroundColor.darkGray),
-                    ('白色', BackgroundColor.white),
+                    (AppLocalizations.of(context).black, BackgroundColor.black),
+                    (
+                      AppLocalizations.of(context).darkGray,
+                      BackgroundColor.darkGray,
+                    ),
+                    (AppLocalizations.of(context).white, BackgroundColor.white),
                   ],
                   settings.backgroundColor,
                   (value) => settings.setBackgroundColor(value),
                 ),
                 _buildRadioSetting(
                   context,
-                  '图片显示方向',
+                  AppLocalizations.of(context).orientationLabel,
                   [
-                    ('横屏', ImageOrientation.landscape),
-                    ('竖屏', ImageOrientation.portrait),
-                    ('跟随系统', ImageOrientation.followSystem),
-                    ('跟随图片', ImageOrientation.followImage),
+                    (
+                      AppLocalizations.of(context).landscape,
+                      ImageOrientation.landscape,
+                    ),
+                    (
+                      AppLocalizations.of(context).portrait,
+                      ImageOrientation.portrait,
+                    ),
+                    (
+                      AppLocalizations.of(context).followSystem,
+                      ImageOrientation.followSystem,
+                    ),
+                    (
+                      AppLocalizations.of(context).followImage,
+                      ImageOrientation.followImage,
+                    ),
                   ],
                   settings.imageOrientation,
                   (value) => settings.setImageOrientation(value),
@@ -107,18 +163,30 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 24),
 
           // 切换动画
-          _buildSectionTitle('切换动画'),
+          _buildSectionTitle(AppLocalizations.of(context).transitionAnimation),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
                 _buildRadioSetting(
                   context,
-                  '切换动画选择',
+                  AppLocalizations.of(context).transitionAnimation,
                   [
-                    ('无动画', TransitionAnimation.none),
-                    ('淡入淡出', TransitionAnimation.fade),
-                    ('左右滑动', TransitionAnimation.slideLeft),
-                    ('上下滑动', TransitionAnimation.slideUp),
+                    (
+                      AppLocalizations.of(context).none,
+                      TransitionAnimation.none,
+                    ),
+                    (
+                      AppLocalizations.of(context).fade,
+                      TransitionAnimation.fade,
+                    ),
+                    (
+                      AppLocalizations.of(context).slideLeft,
+                      TransitionAnimation.slideLeft,
+                    ),
+                    (
+                      AppLocalizations.of(context).slideUp,
+                      TransitionAnimation.slideUp,
+                    ),
                   ],
                   settings.transitionAnimation,
                   (value) => settings.setTransitionAnimation(value),
@@ -139,7 +207,7 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 24),
 
           // 窗口/全屏控制
-          _buildSectionTitle('窗口/全屏控制'),
+          _buildSectionTitle(AppLocalizations.of(context).windowFullscreen),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
@@ -180,7 +248,7 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 24),
 
           // 文件与目录相关
-          _buildSectionTitle('文件与目录相关'),
+          _buildSectionTitle(AppLocalizations.of(context).filesAndDirs),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
@@ -197,7 +265,7 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 24),
 
           // 信息显示设置
-          _buildSectionTitle('信息显示设置'),
+          _buildSectionTitle(AppLocalizations.of(context).infoDisplay),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
@@ -231,23 +299,29 @@ class SettingsScreen extends StatelessWidget {
           const SizedBox(height: 24),
 
           // 快捷键与控制
-          _buildSectionTitle('快捷键与控制'),
+          _buildSectionTitle(AppLocalizations.of(context).controlsLabel),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
                 _buildRadioSetting(
                   context,
-                  '鼠标滚轮行为',
+                  AppLocalizations.of(context).wheelSwitch,
                   [('切换图片', true), ('缩放图片', false)],
                   settings.wheelSwitchImage,
                   (value) => settings.setWheelSwitchImage(value),
                 ),
                 _buildRadioSetting(
                   context,
-                  '删除按钮行为',
+                  AppLocalizations.of(context).deleteBehavior,
                   [
-                    ('排除播放', DeleteAction.exclude),
-                    ('实际删除', DeleteAction.delete),
+                    (
+                      AppLocalizations.of(context).excludeFromPlay,
+                      DeleteAction.exclude,
+                    ),
+                    (
+                      AppLocalizations.of(context).deleteFile,
+                      DeleteAction.delete,
+                    ),
                   ],
                   settings.deleteAction,
                   (value) => settings.setDeleteAction(value),
@@ -323,7 +397,9 @@ class SettingsScreen extends StatelessWidget {
     BuildContext context,
     String title,
     int currentValue,
+    int customInterval,
     void Function(int) onChanged,
+    void Function(int) onCustomChanged,
   ) {
     // 间隔选项（毫秒）
     const intervals = [
@@ -410,81 +486,14 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           // 自定义输入
-          Row(
-            children: [
-              FilterChip(
-                label: Text(
-                  '自定义',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: intervals.contains(currentValue)
-                        ? Colors.white70
-                        : Colors.white,
-                  ),
-                ),
-                selected: !intervals.contains(currentValue),
-                onSelected: (_) {},
-                selectedColor: const Color(0xFFe94560),
-                backgroundColor: const Color(0xFF0f3460),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 100,
-                child: TextField(
-                  controller: TextEditingController(
-                    text: !intervals.contains(currentValue)
-                        ? '${currentValue ~/ 1000}'
-                        : '',
-                  ),
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    hintText: '秒数',
-                    hintStyle: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 14,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade700),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: Colors.grey.shade700),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFe94560)),
-                    ),
-                    isDense: true,
-                  ),
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  onSubmitted: (value) {
-                    final seconds = int.tryParse(value);
-                    if (seconds != null && seconds > 1 && seconds < 65535) {
-                      onChanged(seconds * 1000);
-                    }
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                '秒',
-                style: TextStyle(color: Colors.grey, fontSize: 14),
-              ),
-            ],
+          _CustomIntervalInput(
+            currentValue: currentValue,
+            customInterval: customInterval,
+            intervals: intervals,
+            onChanged: onChanged,
+            onCustomChanged: onCustomChanged,
+            intervalLabel: intervalLabel,
           ),
-          if (!intervals.contains(currentValue))
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                '当前: ${currentValue ~/ 1000}秒（须为大于1且小于65535的整数）',
-                style: const TextStyle(color: Colors.orange, fontSize: 12),
-              ),
-            ),
         ],
       ),
     );
@@ -596,6 +605,140 @@ class SettingsScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 自定义时间输入组件（StatefulWidget 以保持 TextEditingController 稳定）
+class _CustomIntervalInput extends StatefulWidget {
+  final int currentValue;
+  final int customInterval;
+  final List<int> intervals;
+  final void Function(int) onChanged;
+  final void Function(int) onCustomChanged;
+  final String Function(int) intervalLabel;
+
+  const _CustomIntervalInput({
+    required this.currentValue,
+    required this.customInterval,
+    required this.intervals,
+    required this.onChanged,
+    required this.onCustomChanged,
+    required this.intervalLabel,
+  });
+
+  @override
+  State<_CustomIntervalInput> createState() => _CustomIntervalInputState();
+}
+
+class _CustomIntervalInputState extends State<_CustomIntervalInput> {
+  late TextEditingController _controller;
+
+  bool get _isCustom => !widget.intervals.contains(widget.currentValue);
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _CustomIntervalInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _applyValue(String text) {
+    final seconds = int.tryParse(text);
+    if (seconds != null && seconds > 1 && seconds < 65535) {
+      final ms = seconds * 1000;
+      widget.onChanged(ms);
+      widget.onCustomChanged(ms);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isCustom = _isCustom;
+    final customSeconds = widget.customInterval ~/ 1000;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilterChip(
+              label: Text(
+                '自定义',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isCustom ? Colors.white : Colors.white70,
+                ),
+              ),
+              selected: isCustom,
+              onSelected: (_) {
+                if (!isCustom) {
+                  // 切到自定义模式：使用保存的自定义秒数
+                  _controller.text = '$customSeconds';
+                  widget.onChanged(widget.customInterval);
+                }
+              },
+              selectedColor: const Color(0xFFe94560),
+              backgroundColor: const Color(0xFF0f3460),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 80,
+              height: 38,
+              child: TextField(
+                controller: _controller,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  hintText: '$customSeconds',
+                  hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.grey.shade700),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.grey.shade700),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFe94560)),
+                  ),
+                  isDense: true,
+                ),
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                onChanged: (value) => _applyValue(value),
+                onSubmitted: (value) => _applyValue(value),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text('秒', style: TextStyle(color: Colors.grey, fontSize: 14)),
+          ],
+        ),
+        if (isCustom &&
+            (widget.currentValue ~/ 1000 < 2 ||
+                widget.currentValue ~/ 1000 > 65534))
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              '须为大于1且小于65535的整数',
+              style: const TextStyle(color: Colors.orange, fontSize: 12),
+            ),
+          ),
+      ],
     );
   }
 }
