@@ -6,6 +6,7 @@ import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/screens/folder_selection_screen.dart';
+import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/l10n/app_localizations.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -175,6 +176,21 @@ class _HomeScreenState extends State<HomeScreen> {
       'tif',
     };
 
+    // Android 端通过 MediaStore 查询（绕过 Scoped Storage 限制）
+    if (Platform.isAndroid) {
+      final images = await MediaStoreService.getFolderImages(folderPath);
+      return images
+          .where((item) {
+            final dotIndex = item.path.lastIndexOf('.');
+            if (dotIndex == -1) return false;
+            final ext = item.path.toLowerCase().substring(dotIndex + 1);
+            return supportedExtensions.contains(ext);
+          })
+          .map((item) => ImageItem(name: item.name, path: item.path))
+          .toList();
+    }
+
+    // 桌面端使用文件系统 API
     List<File> files = [];
 
     if (settings.recursiveScan) {

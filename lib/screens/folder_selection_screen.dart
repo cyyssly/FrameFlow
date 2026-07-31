@@ -56,10 +56,15 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
 
       if (!mounted) return;
       // 弹出相册多选对话框
+      final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+      final currentFolderPaths = slideProvider.folderPaths.toSet();
       final selectedAlbums = await showDialog<List<AlbumInfo>>(
         context: context,
         builder: (context) {
-          final selected = <bool>[for (final _ in albums) false];
+          // 已选中的相册默认勾选
+          final selected = <bool>[
+            for (final album in albums) currentFolderPaths.contains(album.path),
+          ];
           return AlertDialog(
             backgroundColor: const Color(0xFF16213e),
             title: const Text(
@@ -206,7 +211,19 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       int imageCount = 0;
       int subfolderCount = 0;
 
-      if (settingsProvider.recursiveScan) {
+      if (Platform.isAndroid) {
+        // Android 端通过 MediaStore 查询（绕过 Scoped Storage 限制）
+        final images = await MediaStoreService.getFolderImages(folderPath);
+        for (final item in images) {
+          final dotIndex = item.path.lastIndexOf('.');
+          if (dotIndex != -1) {
+            final ext = item.path.toLowerCase().substring(dotIndex + 1);
+            if (supportedExtensions.contains(ext)) {
+              imageCount++;
+            }
+          }
+        }
+      } else if (settingsProvider.recursiveScan) {
         final dir = Directory(folderPath);
         await for (var entity in dir.list(recursive: true)) {
           if (entity is File) {
@@ -542,6 +559,21 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       'tif',
     };
 
+    // Android 端通过 MediaStore 查询（绕过 Scoped Storage 限制）
+    if (Platform.isAndroid) {
+      final images = await MediaStoreService.getFolderImages(folderPath);
+      return images
+          .where((item) {
+            final dotIndex = item.path.lastIndexOf('.');
+            if (dotIndex == -1) return false;
+            final ext = item.path.toLowerCase().substring(dotIndex + 1);
+            return supportedExtensions.contains(ext);
+          })
+          .map((item) => ImageItem(name: item.name, path: item.path))
+          .toList();
+    }
+
+    // 桌面端使用文件系统 API
     List<File> files = [];
 
     if (settings.recursiveScan) {

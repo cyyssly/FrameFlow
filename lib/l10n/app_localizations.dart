@@ -99,6 +99,7 @@ class AppLocalizations {
   String get languageLabel => _t('语言', 'Language', '語言');
   String get systemLang => _t('跟随系统', 'System', '跟隨系統');
   String get playOrderMode => _t('播放顺序模式', 'Play Order', '播放順序模式');
+  String get playSettings => _t('播放设置', 'Playback', '播放設置');
   String get sequential => _t('顺序播放', 'Sequential', '順序播放');
   String get randomPlay => _t('随机播放', 'Random', '隨機播放');
   String get newestFirst => _t('由新到旧', 'Newest First', '由新到舊');

@@ -11,6 +11,7 @@ import 'package:image/image.dart' as img;
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
+import 'package:slide_show/services/media_store_service.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -448,18 +449,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
-    // 如果暂停时保持工具栏，则不自动隐藏
-    if (settings.keepControlsOnPause && !slideProvider.isPlaying) {
-      setState(() {
-        _showControls = true;
-      });
-      return;
-    }
-
     // 根据设置的延迟时间自动隐藏
     _hideControlsTimer = Timer(
       Duration(seconds: settings.controlsHideDelay),
       () {
+        if (!mounted) return;
+        // 如果暂停时保持工具栏，隐藏前检查播放状态
+        if (settings.keepControlsOnPause && !slideProvider.isPlaying) {
+          return;
+        }
         setState(() {
           _showControls = false;
         });
@@ -480,20 +478,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _showControlsTemporarily() {
+    if (!mounted) return;
     setState(() {
       _showControls = true;
       _showInfo = true;
     });
-
-    // 如果暂停时保持工具栏且当前处于暂停状态，不启动隐藏定时器
-    final settings = Provider.of<SettingsProvider>(context, listen: false);
-    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
-
-    if (settings.keepControlsOnPause && !slideProvider.isPlaying) {
-      // 暂停时保持工具栏，不启动隐藏定时器
-      return;
-    }
-
     _hideControlsDelayed();
     _hideInfoDelayed();
   }
@@ -730,6 +719,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _showControls = true;
       _isFullscreen = false;
     });
+    // 退出全屏后重新启动自动隐藏定时器
+    _hideControlsDelayed();
+    _hideInfoDelayed();
   }
 
   void _handleScaleStart(ScaleStartDetails details) {
@@ -796,32 +788,48 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       // 逐个扫描文件夹
       for (final folderPath in slideProvider.folderPaths) {
-        List<File> files = [];
-
-        if (settingsProvider.recursiveScan) {
-          final dir = Directory(folderPath);
-          await for (var entity in dir.list(recursive: true)) {
-            if (entity is File) {
-              files.add(entity);
+        // Android 端通过 MediaStore 查询（绕过 Scoped Storage 限制）
+        if (Platform.isAndroid) {
+          final images = await MediaStoreService.getFolderImages(folderPath);
+          for (final item in images) {
+            final dotIndex = item.path.lastIndexOf('.');
+            if (dotIndex == -1) continue;
+            final ext = item.path.toLowerCase().substring(dotIndex + 1);
+            if (supportedExtensions.contains(ext)) {
+              final imageItem = ImageItem(name: item.name, path: item.path);
+              if (!uniqueImages.containsKey(imageItem.path)) {
+                uniqueImages[imageItem.path] = imageItem;
+              }
             }
           }
         } else {
-          final dir = Directory(folderPath);
-          final entities = await dir.list().toList();
-          files = entities.whereType<File>().toList();
-        }
+          List<File> files = [];
 
-        for (final file in files) {
-          final dotIndex = file.path.lastIndexOf('.');
-          if (dotIndex == -1) continue;
-          final ext = file.path.toLowerCase().substring(dotIndex + 1);
-          if (supportedExtensions.contains(ext)) {
-            final imageItem = ImageItem(
-              name: file.path.split(Platform.pathSeparator).last,
-              path: file.path,
-            );
-            if (!uniqueImages.containsKey(imageItem.path)) {
-              uniqueImages[imageItem.path] = imageItem;
+          if (settingsProvider.recursiveScan) {
+            final dir = Directory(folderPath);
+            await for (var entity in dir.list(recursive: true)) {
+              if (entity is File) {
+                files.add(entity);
+              }
+            }
+          } else {
+            final dir = Directory(folderPath);
+            final entities = await dir.list().toList();
+            files = entities.whereType<File>().toList();
+          }
+
+          for (final file in files) {
+            final dotIndex = file.path.lastIndexOf('.');
+            if (dotIndex == -1) continue;
+            final ext = file.path.toLowerCase().substring(dotIndex + 1);
+            if (supportedExtensions.contains(ext)) {
+              final imageItem = ImageItem(
+                name: file.path.split(Platform.pathSeparator).last,
+                path: file.path,
+              );
+              if (!uniqueImages.containsKey(imageItem.path)) {
+                uniqueImages[imageItem.path] = imageItem;
+              }
             }
           }
         }
@@ -1132,7 +1140,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTapDown: (_) {
-                  // 立即显示控件，不等待 tap 事件完成
                   _showControlsTemporarily();
                 },
                 onTap: () {
@@ -1264,45 +1271,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               if (settings.showImageInfo && _showInfo)
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 12),
-                                  child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        slideProvider
-                                            .images[slideProvider.currentIndex]
-                                            .name,
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Text(
-                                        _getFileSize(
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Text(
                                           slideProvider
                                               .images[slideProvider
                                                   .currentIndex]
-                                              .path,
+                                              .name,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.white,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey,
+                                        const SizedBox(width: 16),
+                                        Text(
+                                          _getFileSize(
+                                            slideProvider
+                                                .images[slideProvider
+                                                    .currentIndex]
+                                                .path,
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Text(
-                                        _getImageResolution(
-                                          slideProvider
-                                              .images[slideProvider
-                                                  .currentIndex]
-                                              .path,
+                                        const SizedBox(width: 16),
+                                        Text(
+                                          _getImageResolution(
+                                            slideProvider
+                                                .images[slideProvider
+                                                    .currentIndex]
+                                                .path,
+                                          ),
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey,
+                                          ),
                                         ),
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey,
-                                        ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                               Row(

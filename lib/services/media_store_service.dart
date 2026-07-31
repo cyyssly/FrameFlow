@@ -89,6 +89,27 @@ class MediaStoreService {
     }
   }
 
+  /// 通过 MediaStore 查询指定文件夹下的所有图片路径（Android 专用）
+  static Future<List<({String name, String path})>> getFolderImages(
+    String folderPath,
+  ) async {
+    if (!Platform.isAndroid) return [];
+    try {
+      final result = await _channel.invokeMethod('getFolderImages', {
+        'folderPath': folderPath,
+      });
+      if (result == null) return [];
+      final List<dynamic> list = result as List<dynamic>;
+      return list.map((item) {
+        final map = Map<String, dynamic>.from(item as Map);
+        return (name: map['name'] as String, path: map['path'] as String);
+      }).toList();
+    } catch (e) {
+      debugPrint('[MediaStoreService] getFolderImages failed: $e');
+      return [];
+    }
+  }
+
   /// 回退方案：扫描常见图片目录（含子目录）
   static Future<List<AlbumInfo>> _fallbackScan() async {
     if (!Platform.isAndroid) return [];

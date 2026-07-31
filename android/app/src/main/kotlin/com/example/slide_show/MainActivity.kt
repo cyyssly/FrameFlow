@@ -26,6 +26,10 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "getImageAlbums" -> handleGetImageAlbums(result)
                 "requestStoragePermission" -> handleRequestPermission(result)
+                "getFolderImages" -> {
+                    val folderPath = call.argument<String>("folderPath") ?: ""
+                    handleGetFolderImages(folderPath, result)
+                }
                 "readImageBytes" -> {
                     val path = call.argument<String>("path") ?: ""
                     handleReadImageBytes(path, result)
@@ -104,6 +108,89 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             result.error("READ_FAILED", "读取文件失败: ${e.message}", null)
         }
+    }
+
+    /// 通过 MediaStore 查询指定文件夹下的所有图片路径
+    private fun handleGetFolderImages(folderPath: String, result: MethodChannel.Result) {
+        if (!hasStoragePermission()) {
+            result.error("PERMISSION_DENIED", "没有读取图片的权限", null)
+            return
+        }
+        try {
+            val images = queryFolderImages(folderPath)
+            result.success(images)
+        } catch (e: Exception) {
+            android.util.Log.e("FrameFlow", "getFolderImages failed: ${e.message}", e)
+            result.error("QUERY_FAILED", "查询文件夹图片失败: ${e.message}", null)
+        }
+    }
+
+    /// 通过 MediaStore ContentResolver 按文件夹路径查询图片
+    private fun queryFolderImages(folderPath: String): List<Map<String, Any>> {
+        val images = mutableListOf<Map<String, Any>>()
+        val contentResolver: ContentResolver = contentResolver
+
+        // 把文件夹路径转为 relative_path 格式
+        // 输入: /storage/emulated/0/DCIM/Camera
+        // 输出: DCIM/Camera/
+        val rootDir = Environment.getExternalStorageDirectory().absolutePath
+        val relativePath = if (folderPath.startsWith(rootDir)) {
+            var rel = folderPath.removePrefix(rootDir).trimStart('/')
+            if (rel.isNotEmpty() && !rel.endsWith("/")) rel += "/"
+            rel
+        } else {
+            // 如果路径不在标准 external storage 下，尝试直接用 DATA 列匹配后缀
+            null
+        }
+
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DATA
+        )
+
+        // 查询条件：相对路径匹配，或 DATA 列以文件夹路径开头
+        val selection = if (relativePath != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            "${MediaStore.Images.Media.RELATIVE_PATH} = ?"
+        } else {
+            "${MediaStore.Images.Media.DATA} LIKE ?"
+        }
+        val selectionArgs = if (relativePath != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            arrayOf(relativePath)
+        } else {
+            arrayOf("$folderPath/%")
+        }
+
+        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        val cursor = contentResolver.query(
+            collection,
+            projection,
+            selection,
+            selectionArgs,
+            null
+        )
+
+        cursor?.use {
+            val idIdx = it.getColumnIndex(MediaStore.Images.Media._ID)
+            val dataIdx = it.getColumnIndex(MediaStore.Images.Media.DATA)
+            if (idIdx < 0) return@use
+
+            while (it.moveToNext()) {
+                var imagePath: String? = null
+                if (dataIdx >= 0) {
+                    imagePath = it.getString(dataIdx)
+                }
+                if (imagePath == null || imagePath.isBlank()) continue
+
+                images.add(
+                    mapOf(
+                        "name" to imagePath.substringAfterLast('/'),
+                        "path" to imagePath
+                    )
+                )
+            }
+        }
+
+        return images
     }
 
     private fun hasStoragePermission(): Boolean {

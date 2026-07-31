@@ -40,7 +40,7 @@ class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           // 播放基础设置
-          _buildSectionTitle(AppLocalizations.of(context).playOrderMode),
+          _buildSectionTitle(AppLocalizations.of(context).playSettings),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -356,15 +356,42 @@ class SettingsScreen extends StatelessWidget {
     bool value,
     void Function(bool) onChanged,
   ) {
-    return SwitchListTile(
-      title: Text(title),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(fontSize: 12, color: Colors.grey),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.bodyLarge),
+                if (subtitle.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      subtitle,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // 固定宽度容器，开关右边缘与下拉按钮右边缘对齐
+          SizedBox(
+            width: 100,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Switch(
+                  value: value,
+                  onChanged: onChanged,
+                  activeColor: const Color(0xFFe94560),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
-      value: value,
-      onChanged: onChanged,
-      activeThumbColor: const Color(0xFFe94560),
     );
   }
 
@@ -430,69 +457,118 @@ class SettingsScreen extends StatelessWidget {
       return '${ms ~/ 60000}分钟';
     }
 
+    // 构建下拉选项：仅预设值，自定义单独一行
+    final intervalOptions = intervals
+        .map((ms) => (intervalLabel(ms), ms))
+        .toList();
+
+    final isCustom = !intervals.contains(currentValue);
+    final selectedLabel = isCustom ? '自定义' : intervalLabel(currentValue);
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: Theme.of(context).textTheme.bodyLarge),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              ),
+              PopupMenuButton<int>(
+                initialValue: currentValue,
+                onSelected: (value) {
+                  if (value != -1) {
+                    onChanged(value);
+                  }
+                },
+                offset: const Offset(0, 40),
+                itemBuilder: (context) => [
+                  ...intervalOptions.map((opt) {
+                    final sel = opt.$2 == currentValue;
+                    return PopupMenuItem<int>(
+                      value: opt.$2,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(opt.$1),
+                          if (sel) ...[
+                            const SizedBox(width: 8),
+                            const Icon(
+                              Icons.check,
+                              size: 18,
+                              color: Color(0xFFe94560),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0f3460),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        selectedLabel,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_drop_down, color: Colors.white70),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          // 自定义间隔输入（独立一行）
           const SizedBox(height: 12),
-          // 秒级选项
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: intervals.take(10).map((ms) {
-              final selected = currentValue == ms;
-              return FilterChip(
-                label: Text(intervalLabel(ms)),
-                selected: selected,
-                onSelected: (_) => onChanged(ms),
-                selectedColor: const Color(0xFFe94560),
-                backgroundColor: const Color(0xFF0f3460),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 8),
-          // 秒级扩展选项
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: intervals.skip(10).take(5).map((ms) {
-              final selected = currentValue == ms;
-              return FilterChip(
-                label: Text(intervalLabel(ms)),
-                selected: selected,
-                onSelected: (_) => onChanged(ms),
-                selectedColor: const Color(0xFFe94560),
-                backgroundColor: const Color(0xFF0f3460),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 8),
-          // 分钟级选项
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: intervals.skip(15).map((ms) {
-              final selected = currentValue == ms;
-              return FilterChip(
-                label: Text(intervalLabel(ms)),
-                selected: selected,
-                onSelected: (_) => onChanged(ms),
-                selectedColor: const Color(0xFFe94560),
-                backgroundColor: const Color(0xFF0f3460),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 12),
-          // 自定义输入
-          _CustomIntervalInput(
-            currentValue: currentValue,
-            customInterval: customInterval,
-            intervals: intervals,
-            onChanged: onChanged,
-            onCustomChanged: onCustomChanged,
-            intervalLabel: intervalLabel,
+          Row(
+            children: [
+              Text(
+                '自定义',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isCustom ? const Color(0xFFe94560) : Colors.white70,
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 80,
+                height: 38,
+                child: _CustomInlineInput(
+                  initialValue: customInterval ~/ 1000,
+                  onSubmit: (seconds) {
+                    final ms = seconds * 1000;
+                    onChanged(ms);
+                    onCustomChanged(ms);
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                '秒',
+                style: TextStyle(color: Colors.grey, fontSize: 14),
+              ),
+              if (isCustom) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.check, size: 18, color: Color(0xFFe94560)),
+              ],
+            ],
           ),
         ],
       ),
@@ -643,42 +719,35 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-/// 自定义时间输入组件（StatefulWidget 以保持 TextEditingController 稳定）
-class _CustomIntervalInput extends StatefulWidget {
-  final int currentValue;
-  final int customInterval;
-  final List<int> intervals;
-  final void Function(int) onChanged;
-  final void Function(int) onCustomChanged;
-  final String Function(int) intervalLabel;
+/// 内嵌在 PopupMenu 中的自定义秒数输入组件
+class _CustomInlineInput extends StatefulWidget {
+  final int initialValue;
+  final void Function(int) onSubmit;
 
-  const _CustomIntervalInput({
-    required this.currentValue,
-    required this.customInterval,
-    required this.intervals,
-    required this.onChanged,
-    required this.onCustomChanged,
-    required this.intervalLabel,
+  const _CustomInlineInput({
+    required this.initialValue,
+    required this.onSubmit,
   });
 
   @override
-  State<_CustomIntervalInput> createState() => _CustomIntervalInputState();
+  State<_CustomInlineInput> createState() => _CustomInlineInputState();
 }
 
-class _CustomIntervalInputState extends State<_CustomIntervalInput> {
+class _CustomInlineInputState extends State<_CustomInlineInput> {
   late TextEditingController _controller;
-
-  bool get _isCustom => !widget.intervals.contains(widget.currentValue);
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: '');
+    _controller = TextEditingController(text: '${widget.initialValue}');
   }
 
   @override
-  void didUpdateWidget(covariant _CustomIntervalInput oldWidget) {
+  void didUpdateWidget(covariant _CustomInlineInput oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialValue != widget.initialValue) {
+      _controller.text = '${widget.initialValue}';
+    }
   }
 
   @override
@@ -687,92 +756,38 @@ class _CustomIntervalInputState extends State<_CustomIntervalInput> {
     super.dispose();
   }
 
-  void _applyValue(String text) {
-    final seconds = int.tryParse(text);
+  void _submit() {
+    final seconds = int.tryParse(_controller.text);
     if (seconds != null && seconds > 1 && seconds < 65535) {
-      final ms = seconds * 1000;
-      widget.onChanged(ms);
-      widget.onCustomChanged(ms);
+      widget.onSubmit(seconds);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isCustom = _isCustom;
-    final customSeconds = widget.customInterval ~/ 1000;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            FilterChip(
-              label: Text(
-                '自定义',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isCustom ? Colors.white : Colors.white70,
-                ),
-              ),
-              selected: isCustom,
-              onSelected: (_) {
-                if (!isCustom) {
-                  // 切到自定义模式：使用保存的自定义秒数
-                  _controller.text = '$customSeconds';
-                  widget.onChanged(widget.customInterval);
-                }
-              },
-              selectedColor: const Color(0xFFe94560),
-              backgroundColor: const Color(0xFF0f3460),
-            ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 80,
-              height: 38,
-              child: TextField(
-                controller: _controller,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  hintText: '$customSeconds',
-                  hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: Colors.grey.shade700),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: Colors.grey.shade700),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFe94560)),
-                  ),
-                  isDense: true,
-                ),
-                style: const TextStyle(color: Colors.white, fontSize: 14),
-                onChanged: (value) => _applyValue(value),
-                onSubmitted: (value) => _applyValue(value),
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Text('秒', style: TextStyle(color: Colors.grey, fontSize: 14)),
-          ],
+    return TextField(
+      controller: _controller,
+      keyboardType: TextInputType.number,
+      style: const TextStyle(fontSize: 13, color: Colors.white),
+      decoration: InputDecoration(
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        filled: true,
+        fillColor: Colors.black26,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Colors.white24),
         ),
-        if (isCustom &&
-            (widget.currentValue ~/ 1000 < 2 ||
-                widget.currentValue ~/ 1000 > 65534))
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Text(
-              '须为大于1且小于65535的整数',
-              style: const TextStyle(color: Colors.orange, fontSize: 12),
-            ),
-          ),
-      ],
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Colors.white24),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: const BorderSide(color: Color(0xFFe94560)),
+        ),
+      ),
+      onSubmitted: (_) => _submit(),
     );
   }
 }
