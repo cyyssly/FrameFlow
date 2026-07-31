@@ -42,6 +42,7 @@ class MyApp extends StatelessWidget {
 
     return MaterialApp(
       title: 'FrameFlow',
+      debugShowCheckedModeBanner: false,
       locale: locale,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
