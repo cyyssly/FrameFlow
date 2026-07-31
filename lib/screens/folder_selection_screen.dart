@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +7,7 @@ import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/screens/excluded_images_screen.dart';
+import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/l10n/app_localizations.dart';
 
 class FolderSelectionScreen extends StatefulWidget {
@@ -24,18 +26,155 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
   final Set<String> _scanningFolders = {};
 
   Future<void> _addFolder() async {
-    final result = await FilePicker.platform.getDirectoryPath();
-    if (result != null) {
-      final slideProvider = Provider.of<SlideProvider>(context, listen: false);
-      final settingsProvider = Provider.of<SettingsProvider>(
-        context,
-        listen: false,
-      );
-      slideProvider.addFolderPath(result);
-      settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
+    if (Platform.isAndroid) {
+      // Android 端使用 MediaStore 读取相册列表
+      final hasPermission = await MediaStoreService.requestStoragePermission();
+      if (!hasPermission) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('需要存储权限才能读取图片'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
 
-      // 计算新添加文件夹的统计信息
-      _countFolderImages(result);
+      final albums = await MediaStoreService.getImageAlbums();
+      if (albums.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('未找到包含图片的相册'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (!mounted) return;
+      // 弹出相册多选对话框
+      final selectedAlbums = await showDialog<List<AlbumInfo>>(
+        context: context,
+        builder: (context) {
+          final selected = <bool>[for (final _ in albums) false];
+          return AlertDialog(
+            backgroundColor: const Color(0xFF16213e),
+            title: const Text(
+              '选择相册',
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              // 限制最大高度，确保相册列表可以滚动
+              height: MediaQuery.of(context).size.height * 0.6,
+              child: StatefulBuilder(
+                builder: (context, setDialogState) => ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: albums.length,
+                  itemBuilder: (context, index) {
+                    final album = albums[index];
+                    final isChecked = selected[index];
+                    return CheckboxListTile(
+                      value: isChecked,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selected[index] = value ?? false;
+                        });
+                      },
+                      activeColor: const Color(0xFFe94560),
+                      checkColor: Colors.white,
+                      secondary: _AlbumThumbnail(
+                        thumbnailPath: album.thumbnailPath,
+                        albumPath: album.path,
+                      ),
+                      title: Text(
+                        album.name,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${album.imageCount} 张图片',
+                        style: const TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  '取消',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  final chosen = <AlbumInfo>[];
+                  for (var i = 0; i < albums.length; i++) {
+                    if (selected[i]) chosen.add(albums[i]);
+                  }
+                  Navigator.pop(context, chosen.isEmpty ? null : chosen);
+                },
+                child: const Text(
+                  '确定',
+                  style: TextStyle(
+                    color: Color(0xFFe94560),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (selectedAlbums != null && selectedAlbums.isNotEmpty) {
+        final slideProvider = Provider.of<SlideProvider>(
+          context,
+          listen: false,
+        );
+        final settingsProvider = Provider.of<SettingsProvider>(
+          context,
+          listen: false,
+        );
+        for (final album in selectedAlbums) {
+          slideProvider.addFolderPath(album.path);
+        }
+        settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
+
+        // 计算新添加相册的统计信息
+        for (final album in selectedAlbums) {
+          _countFolderImages(album.path);
+        }
+      }
+    } else {
+      // 桌面端使用 FilePicker
+      final result = await FilePicker.platform.getDirectoryPath();
+      if (result != null) {
+        final slideProvider = Provider.of<SlideProvider>(
+          context,
+          listen: false,
+        );
+        final settingsProvider = Provider.of<SettingsProvider>(
+          context,
+          listen: false,
+        );
+        slideProvider.addFolderPath(result);
+        settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
+
+        // 计算新添加文件夹的统计信息
+        _countFolderImages(result);
+      }
     }
   }
 
@@ -113,6 +252,17 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
     }
   }
 
+  /// 提取路径的最后一级目录名（兼容 / 和 \ 分隔符）
+  String _getLastPathSegment(String path) {
+    // 去掉末尾的分隔符
+    var clean = path;
+    while (clean.endsWith('/') || clean.endsWith('\\')) {
+      clean = clean.substring(0, clean.length - 1);
+    }
+    final lastIndex = clean.lastIndexOf(RegExp(r'[/\\]'));
+    return lastIndex >= 0 ? clean.substring(lastIndex + 1) : clean;
+  }
+
   /// 构建文件夹统计信息的 widget
   Widget _buildFolderStats(String folderPath) {
     final settingsProvider = Provider.of<SettingsProvider>(
@@ -188,8 +338,37 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     final excludedCount = settings.excludedPaths.length;
     final loc = AppLocalizations.of(context);
+    // 找第一张仍然存在的已排除图片作为缩略图
+    String? firstExcludedPath;
+    for (final path in settings.excludedPaths) {
+      if (File(path).existsSync()) {
+        firstExcludedPath = path;
+        break;
+      }
+    }
     return ListTile(
-      leading: const Icon(Icons.inbox, color: Colors.orange),
+      // 右侧边距缩小，让 > 图标更靠右，与左侧缩略图边距更平衡
+      contentPadding: const EdgeInsets.only(left: 16, right: 4),
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
+          width: 40,
+          height: 40,
+          child: firstExcludedPath != null
+              ? _ThumbnailImage(
+                  thumbnailPath: firstExcludedPath,
+                  albumPath: firstExcludedPath,
+                )
+              : Container(
+                  color: const Color(0xFF1a1a2e),
+                  child: const Icon(
+                    Icons.inbox,
+                    color: Colors.orange,
+                    size: 24,
+                  ),
+                ),
+        ),
+      ),
       title: Text(
         loc.excludeFolderVirtual,
         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
@@ -198,7 +377,12 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         excludedCount > 0 ? '包含 $excludedCount 张图片' : '暂无已排除的图片',
         style: const TextStyle(fontSize: 12, color: Colors.grey),
       ),
-      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+      // 用与 IconButton 相同尺寸的容器包裹，保证与下方删除按钮竖向对齐
+      trailing: const SizedBox(
+        width: 48,
+        height: 48,
+        child: Icon(Icons.chevron_right, color: Colors.grey),
+      ),
       onTap: () {
         Navigator.push(
           context,
@@ -460,9 +644,23 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                     final folderIndex = hasExcluded ? index - 1 : index;
                     final path = slideProvider.folderPaths[folderIndex];
                     return ListTile(
-                      leading: const Icon(Icons.folder, color: Colors.blue),
+                      // 右侧边距缩小，让删除按钮更靠右，与左侧缩略图边距更平衡
+                      contentPadding: const EdgeInsets.only(left: 16, right: 4),
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: _ThumbnailImage(
+                            thumbnailPath: null,
+                            albumPath: path,
+                          ),
+                        ),
+                      ),
                       title: Text(
-                        path,
+                        // 安卓端手机宽度有限，只显示最后一级文件夹名；
+                        // Windows 端保留完整路径
+                        Platform.isAndroid ? _getLastPathSegment(path) : path,
                         style: const TextStyle(fontSize: 14),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -573,6 +771,159 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 相册缩略图组件 - 从 MediaStore 或文件系统加载第一张图片作为缩略图
+  Widget _AlbumThumbnail({
+    required String? thumbnailPath,
+    required String albumPath,
+  }) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: _ThumbnailImage(
+          thumbnailPath: thumbnailPath,
+          albumPath: albumPath,
+        ),
+      ),
+    );
+  }
+}
+
+/// 异步加载缩略图的 StatefulWidget
+class _ThumbnailImage extends StatefulWidget {
+  final String? thumbnailPath;
+  final String albumPath;
+
+  const _ThumbnailImage({required this.thumbnailPath, required this.albumPath});
+
+  @override
+  State<_ThumbnailImage> createState() => _ThumbnailImageState();
+}
+
+class _ThumbnailImageState extends State<_ThumbnailImage> {
+  Uint8List? _imageBytes;
+  bool _loading = true;
+  String? _error;
+
+  static const _supportedExtensions = {
+    'jpg',
+    'jpeg',
+    'png',
+    'webp',
+    'bmp',
+    'gif',
+    'tiff',
+    'tif',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumbnail();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ThumbnailImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.thumbnailPath != widget.thumbnailPath) {
+      _loadThumbnail();
+    }
+  }
+
+  Future<void> _loadThumbnail() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      // 优先使用原生端返回的 content:// URI 或文件路径
+      if (widget.thumbnailPath != null && widget.thumbnailPath!.isNotEmpty) {
+        if (widget.thumbnailPath!.startsWith('content://')) {
+          // 通过 MethodChannel 读取 content:// URI
+          _imageBytes = await MediaStoreService.readImageBytes(
+            widget.thumbnailPath!,
+          );
+        } else {
+          // 直接读取文件路径
+          final file = File(widget.thumbnailPath!);
+          if (await file.exists()) {
+            _imageBytes = await file.readAsBytes();
+          }
+        }
+      }
+
+      // 如果缩略图加载失败，尝试从相册文件夹中找第一张图片
+      if (_imageBytes == null) {
+        final dir = Directory(widget.albumPath);
+        if (await dir.exists()) {
+          await for (final entity in dir.list(recursive: false)) {
+            if (entity is File) {
+              final ext = entity.path.split('.').last.toLowerCase();
+              if (_supportedExtensions.contains(ext)) {
+                try {
+                  _imageBytes = await entity.readAsBytes();
+                  break;
+                } catch (_) {}
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {
+      _error = '加载失败';
+    }
+
+    if (mounted) {
+      setState(() {
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return Container(
+        color: const Color(0xFF1a1a2e),
+        child: const Center(
+          child: SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Color(0xFFe94560),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_imageBytes != null) {
+      return Image.memory(
+        _imageBytes!,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
+      );
+    }
+
+    return _buildPlaceholder();
+  }
+
+  Widget _buildPlaceholder() {
+    return Container(
+      color: const Color(0xFF1a1a2e),
+      child: const Icon(
+        Icons.photo_library,
+        color: Colors.blueAccent,
+        size: 24,
       ),
     );
   }

@@ -25,7 +25,7 @@ class SettingsScreen extends StatelessWidget {
           // 语言设置
           _buildSectionTitle(AppLocalizations.of(context).languageLabel),
           Consumer<SettingsProvider>(
-            builder: (context, settings, child) => _buildRadioSetting(
+            builder: (context, settings, child) => _buildDropdownSetting(
               context,
               AppLocalizations.of(context).languageLabel,
               [
@@ -53,7 +53,7 @@ class SettingsScreen extends StatelessWidget {
                   (value) => settings.setInterval(value),
                   (value) => settings.setCustomInterval(value),
                 ),
-                _buildRadioSetting(
+                _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).playOrderMode,
                   [
@@ -102,7 +102,7 @@ class SettingsScreen extends StatelessWidget {
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
-                _buildRadioSetting(
+                _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).fitMode,
                   [
@@ -119,7 +119,7 @@ class SettingsScreen extends StatelessWidget {
                   settings.imageFitMode,
                   (value) => settings.setImageFitMode(value),
                 ),
-                _buildRadioSetting(
+                _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).backgroundColorLabel,
                   [
@@ -133,7 +133,7 @@ class SettingsScreen extends StatelessWidget {
                   settings.backgroundColor,
                   (value) => settings.setBackgroundColor(value),
                 ),
-                _buildRadioSetting(
+                _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).orientationLabel,
                   [
@@ -167,7 +167,7 @@ class SettingsScreen extends StatelessWidget {
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
-                _buildRadioSetting(
+                _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).transitionAnimation,
                   [
@@ -303,14 +303,14 @@ class SettingsScreen extends StatelessWidget {
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
-                _buildRadioSetting(
+                _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).wheelSwitch,
                   [('切换图片', true), ('缩放图片', false)],
                   settings.wheelSwitchImage,
                   (value) => settings.setWheelSwitchImage(value),
                 ),
-                _buildRadioSetting(
+                _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).deleteBehavior,
                   [
@@ -499,32 +499,66 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildRadioSetting<T>(
+  Widget _buildDropdownSetting<T>(
     BuildContext context,
     String title,
     List<(String, T)> options,
     T value,
     void Function(T) onChanged,
   ) {
+    final selectedLabel = options
+        .firstWhere((o) => o.$2 == value, orElse: () => options.first)
+        .$1;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(title, style: Theme.of(context).textTheme.bodyLarge),
-          Wrap(
-            spacing: 8,
-            children: options
-                .map(
-                  (option) => FilterChip(
-                    label: Text(option.$1),
-                    selected: value == option.$2,
-                    onSelected: (_) => onChanged(option.$2),
-                    selectedColor: const Color(0xFFe94560),
-                    backgroundColor: const Color(0xFF0f3460),
+          Expanded(
+            child: Text(title, style: Theme.of(context).textTheme.bodyLarge),
+          ),
+          PopupMenuButton<T>(
+            initialValue: value,
+            onSelected: onChanged,
+            offset: const Offset(0, 40),
+            itemBuilder: (context) => options.map((option) {
+              final isSelected = value == option.$2;
+              return PopupMenuItem<T>(
+                value: option.$2,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(option.$1),
+                    if (isSelected) ...[
+                      const SizedBox(width: 8),
+                      const Icon(
+                        Icons.check,
+                        size: 18,
+                        color: Color(0xFFe94560),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }).toList(),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0f3460),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    selectedLabel,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
                   ),
-                )
-                .toList(),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_drop_down, color: Colors.white70),
+                ],
+              ),
+            ),
           ),
         ],
       ),

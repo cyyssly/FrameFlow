@@ -340,6 +340,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
         return true;
       }
+    } else if (settings.deleteAction == DeleteAction.exclude) {
+      // 排除播放：记录到已排除列表，供"选择文件夹"页面的"已排除的文件"使用
+      settings.addExcludedPath(currentImage.path);
     }
 
     // 从播放列表中移除
@@ -850,6 +853,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  /// 退出播放：停止自动播放、暂停播放并返回主界面
+  void _exitPlayback() {
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    // 停止自动播放定时器
+    _autoPlayTimer?.cancel();
+    // 如果正在播放，暂停播放
+    if (slideProvider.isPlaying) {
+      slideProvider.togglePlay();
+    }
+    // 返回主界面
+    Navigator.pop(context);
+  }
+
   void _handleKeyEvent(KeyEvent event) {
     if (event is KeyDownEvent) {
       switch (event.logicalKey) {
@@ -863,7 +879,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _nextImage();
           break;
         case LogicalKeyboardKey.escape:
-          _exitFullscreen();
+          // 全屏时按 ESC 退出全屏；非全屏时按 ESC 退出播放
+          if (_isFullscreen) {
+            _exitFullscreen();
+          } else {
+            _exitPlayback();
+          }
           break;
         case LogicalKeyboardKey.keyR:
           _rescanImages();
@@ -1183,19 +1204,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ),
                           ),
                           actions: [
-                            Tooltip(
-                              message: _isFullscreen ? '退出全屏' : '全屏',
-                              child: IconButton(
-                                icon: Icon(
-                                  _isFullscreen
-                                      ? Icons.fullscreen_exit
-                                      : Icons.fullscreen,
+                            // 全屏/退出全屏按钮仅在 Windows 桌面端显示
+                            // （手机端播放本身即全屏，无需切换）
+                            if (Platform.isWindows)
+                              Tooltip(
+                                message: _isFullscreen ? '退出全屏' : '全屏',
+                                child: IconButton(
+                                  icon: Icon(
+                                    _isFullscreen
+                                        ? Icons.fullscreen_exit
+                                        : Icons.fullscreen,
+                                  ),
+                                  onPressed: _isFullscreen
+                                      ? _exitFullscreen
+                                      : _enterFullscreen,
                                 ),
-                                onPressed: _isFullscreen
-                                    ? _exitFullscreen
-                                    : _enterFullscreen,
                               ),
-                            ),
                             Tooltip(
                               message:
                                   settings.deleteAction == DeleteAction.exclude
@@ -1363,17 +1387,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               child: const Icon(Icons.zoom_out),
                             ),
                         ],
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 100,
-                      left: 16,
-                      child: Text(
-                        'ESC: 退出全屏 | 空格: 播放/暂停 | ←→: 切换',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.white.withValues(alpha: 0.5),
-                        ),
                       ),
                     ),
                   ],

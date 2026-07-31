@@ -1,0 +1,6 @@
+;SFX ×¢ÊÍ
+Setup=slide_show.exe
+TempMode
+Silent=1
+Overwrite=1
+Title=FrameFlow »ÃµÆÆ¬²¥·ÅÆ÷

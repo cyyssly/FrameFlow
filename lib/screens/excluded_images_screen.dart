@@ -302,7 +302,7 @@ class _ExcludedImageCardState extends State<_ExcludedImageCard> {
                   fit: BoxFit.cover,
                   width: double.infinity,
                   height: double.infinity,
-                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                  errorBuilder: (_, _, _) => const Icon(Icons.broken_image),
                 ),
                 // 悬停 或 选中 时显示覆盖层
                 if (_isHovered || widget.isSelected) _buildOverlay(context),
