@@ -12,6 +12,7 @@ import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/services/media_store_service.dart';
+import 'package:vector_math/vector_math_64.dart' as vector;
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -43,12 +44,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
 
-    // 初始化焦点
-    _focusNode = FocusNode();
+    // 注册全局键盘监听器，不依赖 FocusNode
+    HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 请求焦点以接收键盘事件
-      _focusNode.requestFocus();
 
       // 如果设置了自动全屏，先进入全屏再开始播放
       if (settings.startFullscreen) {
@@ -58,23 +58,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
           // 全屏后再延迟一小段时间启动自动播放，确保窗口状态稳定
           Future.delayed(const Duration(milliseconds: 100), () {
-            if ((settings.autoPlay || slideProvider.isPlaying) &&
-                slideProvider.images.isNotEmpty) {
-              if (!slideProvider.isPlaying) {
-                slideProvider.togglePlay();
-              }
+            if (slideProvider.isPlaying && slideProvider.images.isNotEmpty) {
               _startAutoPlay();
             }
           });
         });
-      } else if (settings.autoPlay && slideProvider.images.isNotEmpty) {
-        // 没有设置自动全屏时，直接启动自动播放
-        if (!slideProvider.isPlaying) {
-          slideProvider.togglePlay();
-        }
-        _startAutoPlay();
       } else if (slideProvider.isPlaying && slideProvider.images.isNotEmpty) {
-        // 如果已经处于播放状态（从外部设置的），确保定时器也启动
+        // 如果正处于播放状态，启动自动播放定时器
         _startAutoPlay();
       }
 
@@ -98,12 +88,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _autoPlayTimer?.cancel();
     _hideControlsTimer?.cancel();
     _hideInfoTimer?.cancel();
-
-    // 停止幻灯片播放
-    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
-    if (slideProvider.isPlaying) {
-      slideProvider.togglePlay();
-    }
+    // 移除全局键盘监听器
+    HardwareKeyboard.instance.removeHandler(_hardwareKeyHandler);
 
     // 确保退出全屏状态，但不调用 setState
     if (_isFullscreen) {
@@ -192,7 +178,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // 保存当前播放状态
     _wasPlayingBeforeDelete = slideProvider.isPlaying;
     if (slideProvider.isPlaying) {
-      slideProvider.togglePlay();
+      slideProvider.stopPlay();
     }
     _autoPlayTimer?.cancel();
   }
@@ -204,7 +190,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
     if (!slideProvider.isPlaying && slideProvider.images.isNotEmpty) {
-      slideProvider.togglePlay();
+      slideProvider.startPlay();
       _startAutoPlay();
     }
   }
@@ -400,7 +386,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           settings.playOrder == PlayOrder.oldestFirst;
       if (isSequentialOrder &&
           slideProvider.currentIndex == slideProvider.images.length - 1) {
-        slideProvider.togglePlay();
+        slideProvider.stopPlay();
         _autoPlayTimer?.cancel();
 
         // 检查 widget 是否还挂载，避免在已销毁后调用 showDialog
@@ -414,7 +400,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // 随机播放时，检查是否到达随机序列的最后一个位置
       if (settings.playOrder == PlayOrder.random &&
           slideProvider.isRandomPlaybackComplete()) {
-        slideProvider.togglePlay();
+        slideProvider.stopPlay();
         _autoPlayTimer?.cancel();
 
         // 检查 widget 是否还挂载，避免在已销毁后调用 showDialog
@@ -506,8 +492,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // 存储原始窗口样式和位置
   int? _originalStyle;
   int? _originalX, _originalY, _originalWidth, _originalHeight;
-  // 键盘焦点
-  late FocusNode _focusNode;
   // 全屏状态
   bool _isFullscreen = false;
 
@@ -702,13 +686,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 'SetForegroundWindow',
               );
           setForegroundWindow(hwnd);
-
-          // 额外调用 SetFocus 确保窗口获得输入焦点
-          final setFocus = user32
-              .lookupFunction<IntPtr Function(IntPtr), int Function(int)>(
-                'SetFocus',
-              );
-          setFocus(hwnd);
         }
       } catch (_) {
         // 忽略错误
@@ -719,7 +696,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _showControls = true;
       _isFullscreen = false;
     });
-    // 退出全屏后重新启动自动隐藏定时器
+    // 重启自动隐藏定时器
     _hideControlsDelayed();
     _hideInfoDelayed();
   }
@@ -868,24 +845,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _autoPlayTimer?.cancel();
     // 如果正在播放，暂停播放
     if (slideProvider.isPlaying) {
-      slideProvider.togglePlay();
+      slideProvider.stopPlay();
     }
     // 返回主界面
     Navigator.pop(context);
   }
 
-  void _handleKeyEvent(KeyEvent event) {
+  bool _hardwareKeyHandler(KeyEvent event) {
     if (event is KeyDownEvent) {
       switch (event.logicalKey) {
         case LogicalKeyboardKey.space:
           _togglePlay();
-          break;
+          return true;
         case LogicalKeyboardKey.arrowLeft:
-          Provider.of<SlideProvider>(context, listen: false).prevImage();
-          break;
+          final settings = Provider.of<SettingsProvider>(
+            context,
+            listen: false,
+          );
+          Provider.of<SlideProvider>(
+            context,
+            listen: false,
+          ).prevImage(playOrder: settings.playOrder);
+          return true;
         case LogicalKeyboardKey.arrowRight:
           _nextImage();
-          break;
+          return true;
         case LogicalKeyboardKey.escape:
           // 全屏时按 ESC 退出全屏；非全屏时按 ESC 退出播放
           if (_isFullscreen) {
@@ -893,12 +877,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
           } else {
             _exitPlayback();
           }
-          break;
+          return true;
+        case LogicalKeyboardKey.f11:
+          if (_isFullscreen) {
+            _exitFullscreen();
+          } else {
+            _enterFullscreen();
+          }
+          return true;
+        case LogicalKeyboardKey.delete:
+          _showDeleteConfirmation();
+          return true;
         case LogicalKeyboardKey.keyR:
           _rescanImages();
+          return true;
+        default:
           break;
       }
     }
+    return false;
   }
 
   void _handleScroll(PointerSignalEvent event) {
@@ -909,7 +906,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (event.scrollDelta.dy > 0) {
           _nextImage();
         } else if (event.scrollDelta.dy < 0) {
-          Provider.of<SlideProvider>(context, listen: false).prevImage();
+          Provider.of<SlideProvider>(
+            context,
+            listen: false,
+          ).prevImage(playOrder: settings.playOrder);
         }
       } else {
         // 滚轮缩放图片
@@ -1131,10 +1131,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
         return Scaffold(
           backgroundColor: settings.background,
-          body: KeyboardListener(
-            focusNode: _focusNode,
+          body: Focus(
             autofocus: true,
-            onKeyEvent: _handleKeyEvent,
             child: Listener(
               onPointerSignal: _handleScroll,
               child: GestureDetector(
@@ -1164,18 +1162,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         key: ValueKey(slideProvider.currentIndex),
                         alignment: Alignment.center,
                         transform: Matrix4.identity()
-                          ..scale(_scale)
+                          ..scaleByVector3(
+                            vector.Vector3(_scale, _scale, _scale),
+                          )
                           ..rotateZ(_rotation + _autoRotation)
-                          ..translate(_position.dx, _position.dy),
-                        child: Image.file(
-                          File(
-                            slideProvider
-                                .images[slideProvider.currentIndex]
-                                .path,
+                          ..translateByVector3(
+                            vector.Vector3(_position.dx, _position.dy, 0),
                           ),
-                          fit: settings.boxFit,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const Center(child: Text('图片加载失败')),
+                        child: SizedBox.expand(
+                          child: Image.file(
+                            File(
+                              slideProvider
+                                  .images[slideProvider.currentIndex]
+                                  .path,
+                            ),
+                            fit: settings.boxFit,
+                            errorBuilder: (context, error, stackTrace) =>
+                                const Center(child: Text('图片加载失败')),
+                          ),
                         ),
                       ),
                       slideProvider.currentIndex,
@@ -1199,10 +1203,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 // 如果当前是全屏状态，先退出全屏再返回
                                 if (_isFullscreen) {
                                   _exitFullscreen();
+                                  final navigator = Navigator.of(context);
                                   // 延迟一小段时间让窗口状态稳定后再返回
                                   Future.delayed(
                                     const Duration(milliseconds: 200),
-                                    () => Navigator.pop(context),
+                                    () {
+                                      if (mounted) navigator.pop();
+                                    },
                                   );
                                 } else {
                                   Navigator.pop(context);
@@ -1328,7 +1335,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ),
                                     color: Colors.white,
                                     onPressed: () {
-                                      slideProvider.prevImage();
+                                      final settings =
+                                          Provider.of<SettingsProvider>(
+                                            context,
+                                            listen: false,
+                                          );
+                                      slideProvider.prevImage(
+                                        playOrder: settings.playOrder,
+                                      );
                                       _showControlsTemporarily();
                                     },
                                   ),

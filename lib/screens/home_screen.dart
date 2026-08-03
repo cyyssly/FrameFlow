@@ -119,8 +119,9 @@ class _HomeScreenState extends State<HomeScreen> {
         if (settingsProvider.autoPlay) {
           await Future.delayed(const Duration(milliseconds: 500));
 
+          if (!mounted) return;
           slideProvider.goToStartPosition(settingsProvider.playOrder);
-          slideProvider.togglePlay();
+          slideProvider.startPlay();
           if (mounted) {
             Navigator.pushNamed(context, '/player');
           }
@@ -154,8 +155,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     await Future.delayed(const Duration(milliseconds: 300));
 
+    if (!mounted) return;
     slideProvider.goToStartPosition(settingsProvider.playOrder);
-    slideProvider.togglePlay();
+    slideProvider.startPlay();
     if (mounted) {
       Navigator.pushNamed(context, '/player');
     }
@@ -222,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .toList();
   }
 
-  Future<void> _startPlayback(BuildContext context) async {
+  Future<void> _startPlayback() async {
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
     final settingsProvider = Provider.of<SettingsProvider>(
       context,
@@ -264,6 +266,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ..sort((a, b) => a.name.compareTo(b.name));
 
       if (sortedImages.isEmpty) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('选定的目录下没有图片，请重新选择'),
@@ -274,6 +277,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
+      if (!mounted) return;
       slideProvider.setImages(
         sortedImages,
         playOrder: settingsProvider.playOrder,
@@ -281,12 +285,13 @@ class _HomeScreenState extends State<HomeScreen> {
       slideProvider.sortByPlayOrder(settingsProvider.playOrder);
 
       slideProvider.goToStartPosition(settingsProvider.playOrder);
-      slideProvider.togglePlay();
+      slideProvider.startPlay();
       if (mounted) {
         Navigator.pushNamed(context, '/player');
       }
     } catch (e) {
       debugPrint('扫描图片失败: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('扫描图片失败，请重试'),
@@ -343,7 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
               SizedBox(
                 width: MediaQuery.of(context).size.width * 0.5,
                 child: ElevatedButton(
-                  onPressed: () => _startPlayback(context),
+                  onPressed: () => _startPlayback(),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF00b894),
                     foregroundColor: Colors.white,
@@ -497,7 +502,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                'v1.1.0',
+                'V1.2.0',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withValues(alpha: 0.3),

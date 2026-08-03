@@ -29,7 +29,6 @@ class SlideProvider extends ChangeNotifier {
   }
 
   void addImages(List<ImageItem> images) {
-    final initialLength = _images.length;
     for (final image in images) {
       if (!_images.any((img) => img.path == image.path)) {
         _images.add(image);
@@ -167,6 +166,20 @@ class SlideProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void startPlay() {
+    if (!_isPlaying) {
+      _isPlaying = true;
+      notifyListeners();
+    }
+  }
+
+  void stopPlay() {
+    if (_isPlaying) {
+      _isPlaying = false;
+      notifyListeners();
+    }
+  }
+
   void setInterval(int milliseconds) {
     _interval = milliseconds;
     notifyListeners();
@@ -230,9 +243,11 @@ class SlideProvider extends ChangeNotifier {
       // 新索引随机插入到随机序列中
       final randomPos =
           DateTime.now().microsecondsSinceEpoch % (_randomOrder.length);
-      _randomOrder[randomPos] = insertIndex;
-      // 如果新索引插入位置不在末尾，把末尾占位移过去
-      if (randomPos < _randomOrder.length - 1) {
+      if (randomPos == _randomOrder.length - 1) {
+        // 正好选中末尾的占位符，直接替换
+        _randomOrder[randomPos] = insertIndex;
+      } else {
+        // 交换 randomPos 与末尾的值，将新索引插入到 randomPos 位置
         _randomOrder[_randomOrder.length - 1] = _randomOrder[randomPos];
         _randomOrder[randomPos] = insertIndex;
       }

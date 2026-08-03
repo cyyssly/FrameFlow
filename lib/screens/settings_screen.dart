@@ -385,7 +385,7 @@ class SettingsScreen extends StatelessWidget {
                 Switch(
                   value: value,
                   onChanged: onChanged,
-                  activeColor: const Color(0xFFe94560),
+                  activeThumbColor: const Color(0xFFe94560),
                 ),
               ],
             ),
@@ -647,7 +647,9 @@ class SettingsScreen extends StatelessWidget {
       ('←', '上一张'),
       ('→', '下一张'),
       ('R', '重新扫描'),
-      ('ESC', '退出全屏'),
+      ('ESC', '退出播放'),
+      ('F11', '全屏切换'),
+      ('Del', '删除图片'),
     ];
 
     return Container(

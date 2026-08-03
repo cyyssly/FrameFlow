@@ -91,7 +91,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                       },
                       activeColor: const Color(0xFFe94560),
                       checkColor: Colors.white,
-                      secondary: _AlbumThumbnail(
+                      secondary: _albumThumbnail(
                         thumbnailPath: album.thumbnailPath,
                         albumPath: album.path,
                       ),
@@ -144,6 +144,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       );
 
       if (selectedAlbums != null && selectedAlbums.isNotEmpty) {
+        if (!mounted) return;
         final slideProvider = Provider.of<SlideProvider>(
           context,
           listen: false,
@@ -166,6 +167,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       // 桌面端使用 FilePicker
       final result = await FilePicker.platform.getDirectoryPath();
       if (result != null) {
+        if (!mounted) return;
         final slideProvider = Provider.of<SlideProvider>(
           context,
           listen: false,
@@ -185,16 +187,16 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
 
   /// 计算文件夹中的图片数量和子文件夹数量
   Future<void> _countFolderImages(String folderPath) async {
-    final settingsProvider = Provider.of<SettingsProvider>(
-      context,
-      listen: false,
-    );
-
     if (_scanningFolders.contains(folderPath)) return;
 
     setState(() {
       _scanningFolders.add(folderPath);
     });
+
+    final settingsProvider = Provider.of<SettingsProvider>(
+      context,
+      listen: false,
+    );
 
     try {
       const supportedExtensions = {
@@ -254,6 +256,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _folderStats[folderPath] = {
           'imageCount': imageCount,
@@ -262,6 +265,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         _scanningFolders.remove(folderPath);
       });
     } catch (_) {
+      if (!mounted) return;
       setState(() {
         _folderStats[folderPath] = {'imageCount': 0, 'subfolderCount': 0};
         _scanningFolders.remove(folderPath);
@@ -472,6 +476,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         ..sort((a, b) => a.name.compareTo(b.name));
 
       if (sortedImages.isEmpty) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('选定的目录下没有图片'),
@@ -490,6 +495,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         slideProvider.setImages(sortedImages);
         settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
 
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('扫描完成，共 ${sortedImages.length} 张图片'),
@@ -498,6 +504,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
           ),
         );
 
+        if (!mounted) return;
         Navigator.pop(context);
       } else {
         // 已经在播放中，更新完整列表
@@ -507,6 +514,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         }
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('扫描失败: $e'),
@@ -537,7 +545,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
 
     // 开始播放
     slideProvider.goToImage(0);
-    slideProvider.togglePlay();
+    slideProvider.startPlay();
 
     if (mounted) {
       Navigator.pushNamed(context, '/player');
@@ -612,6 +620,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
     super.initState();
     // 页面初始化时，对已有的文件夹触发统计计算
     Future.microtask(() {
+      if (!mounted) return;
       final slideProvider = Provider.of<SlideProvider>(context, listen: false);
       final settingsProvider = Provider.of<SettingsProvider>(
         context,
@@ -808,7 +817,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
   }
 
   /// 相册缩略图组件 - 从 MediaStore 或文件系统加载第一张图片作为缩略图
-  Widget _AlbumThumbnail({
+  Widget _albumThumbnail({
     required String? thumbnailPath,
     required String albumPath,
   }) {
@@ -840,7 +849,6 @@ class _ThumbnailImage extends StatefulWidget {
 class _ThumbnailImageState extends State<_ThumbnailImage> {
   Uint8List? _imageBytes;
   bool _loading = true;
-  String? _error;
 
   static const _supportedExtensions = {
     'jpg',
@@ -870,7 +878,6 @@ class _ThumbnailImageState extends State<_ThumbnailImage> {
   Future<void> _loadThumbnail() async {
     setState(() {
       _loading = true;
-      _error = null;
     });
 
     try {
@@ -907,9 +914,7 @@ class _ThumbnailImageState extends State<_ThumbnailImage> {
           }
         }
       }
-    } catch (_) {
-      _error = '加载失败';
-    }
+    } catch (_) {}
 
     if (mounted) {
       setState(() {

@@ -168,7 +168,7 @@ class AppLocalizations {
       _t('几秒无操作自动消失', 'Hide after idle seconds', '幾秒無操作自動消失');
   String get infoHideDelay => _t('信息隐藏延迟', 'Info Hide Delay', '信息隱藏延遲');
   String get controlsLabel => _t('快捷键与控制', 'Controls', '快捷鍵與控制');
-  String get wheelSwitch => _t('滚轮切换图片', 'Scroll Wheel', '滾輪切換圖片');
+  String get wheelSwitch => _t('滚轮行为', 'Scroll Wheel', '滾輪行為');
   String get wheelSwitchImage => _t('切换图片', 'Switch Image', '切換圖片');
   String get wheelZoom => _t('缩放图片', 'Zoom', '縮放圖片');
   String get deleteBehavior => _t('删除行为', 'Delete', '刪除行為');
@@ -198,9 +198,9 @@ class AppLocalizations {
   String get rotate => _t('旋转', 'Rotate', '旋轉');
   String get customLabel => _t('自定义', 'Custom', '自定義');
   String get shortcutHint => _t(
-    'ESC: 退出全屏 | 空格: 播放/暂停 | ←→: 切换',
-    'ESC: Fullscreen | Space: Play/Pause | ←→: Navigate',
-    'ESC: 退出全屏 | 空格: 播放/暫停 | ←→: 切換',
+    'ESC: 退出播放 | F11: 全屏切换 | Del: 删除图片 | 空格: 播放/暂停 | ←→: 切换',
+    'ESC: Fullscreen | F11: Fullscreen Toggle | Del: Delete Image | Space: Play/Pause | ←→: Navigate',
+    'ESC: 退出播放 | F11: 全屏切換 | Del: 刪除圖片 | 空格: 播放/暫停 | ←→: 切換',
   );
   String get errorRange => _t(
     '须为大于1且小于65535的整数',
