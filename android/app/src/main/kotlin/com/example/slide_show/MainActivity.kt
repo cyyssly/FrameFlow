@@ -1,7 +1,9 @@
 package com.example.slide_show
 
 import android.Manifest
+import android.app.Activity
 import android.content.ContentResolver
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.ContentUris
 import android.net.Uri
@@ -18,6 +20,7 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.slide_show/media_store"
     private var pendingResult: MethodChannel.Result? = null
+    private var pendingTrashResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -33,6 +36,10 @@ class MainActivity : FlutterActivity() {
                 "readImageBytes" -> {
                     val path = call.argument<String>("path") ?: ""
                     handleReadImageBytes(path, result)
+                }
+                "deleteToTrash" -> {
+                    val paths = call.argument<List<String>>("paths") ?: emptyList()
+                    handleDeleteToTrash(paths, result)
                 }
                 else -> result.notImplemented()
             }
@@ -51,6 +58,106 @@ class MainActivity : FlutterActivity() {
                 grantResults.any { it == PackageManager.PERMISSION_GRANTED }
             pendingResult?.success(granted)
             pendingResult = null
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 200) {
+            // 回收站授权结果
+            val success = resultCode == Activity.RESULT_OK
+            pendingTrashResult?.success(success)
+            pendingTrashResult = null
+        }
+    }
+
+    /// 把图片移入系统回收站（Android 11+ 使用 MediaStore.createTrashRequest）
+    private fun handleDeleteToTrash(paths: List<String>, result: MethodChannel.Result) {
+        if (paths.isEmpty()) {
+            result.success(true)
+            return
+        }
+
+        // Android 11+ (API 30+) 使用系统回收站
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val uris = queryUrisByPaths(paths)
+                if (uris.isEmpty()) {
+                    // 查询不到 URI（可能不在 MediaStore 中），回退到直接删除文件
+                    deleteFilesDirectly(paths)
+                    result.success(true)
+                    return
+                }
+                // 创建回收站请求，需要用户授权（弹出系统对话框）
+                val pendingIntent = MediaStore.createTrashRequest(
+                    contentResolver,
+                    uris,
+                    true
+                )
+                pendingTrashResult = result
+                startIntentSenderForResult(
+                    pendingIntent.intentSender,
+                    200,
+                    null,
+                    0,
+                    0,
+                    0
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("FrameFlow", "deleteToTrash failed: ${e.message}", e)
+                // 失败时回退到直接删除
+                deleteFilesDirectly(paths)
+                result.success(true)
+            }
+        } else {
+            // Android 10 及以下：直接删除文件
+            deleteFilesDirectly(paths)
+            result.success(true)
+        }
+    }
+
+    /// 通过路径查询 MediaStore 中的图片 URI
+    private fun queryUrisByPaths(paths: List<String>): List<Uri> {
+        val uris = mutableListOf<Uri>()
+        val contentResolver: ContentResolver = contentResolver
+        val projection = arrayOf(MediaStore.Images.Media._ID)
+
+        for (path in paths) {
+            val selection = "${MediaStore.Images.Media.DATA} = ?"
+            val selectionArgs = arrayOf(path)
+            val cursor = contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                null
+            )
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val id = it.getLong(it.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
+                    uris.add(
+                        ContentUris.withAppendedId(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                            id
+                        )
+                    )
+                }
+            }
+        }
+        return uris
+    }
+
+    /// 直接删除文件（Android 10 及以下，或 MediaStore 查询失败时回退）
+    private fun deleteFilesDirectly(paths: List<String>) {
+        for (path in paths) {
+            try {
+                val file = File(path)
+                if (file.exists()) {
+                    file.delete()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FrameFlow", "delete file failed: $path: ${e.message}")
+            }
         }
     }
 

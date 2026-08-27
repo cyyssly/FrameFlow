@@ -249,6 +249,15 @@ class AppLocalizations {
   String get moveFailed => _t('移动失败', 'Move failed', '移動失敗');
   String get copyFailed => _t('复制失败', 'Copy failed', '複製失敗');
   String get copySuccess => _t('复制成功', 'Copied', '複製成功');
+  String get deletedToTrash => _t('已移入回收站', 'Moved to trash', '已移入回收站');
+  String get deletedAllToTrash =>
+      _t('全部已移入回收站', 'All moved to trash', '全部已移入回收站');
+
+  // 文件夹图片浏览
+  String get noImagesInFolder =>
+      _t('此文件夹中没有图片', 'No images in this folder', '此文件夾中沒有圖片');
+  String get allExcluded => _t('全部已排除', 'All excluded', '全部已排除');
+  String get excludeAll => _t('排除全部', 'Exclude All', '排除全部');
 
   // 内部翻译方法
   String _t(String zhCN, String en, String zhTW) {

@@ -38,11 +38,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _autoRotation = 0.0;
   int _lastProcessedIndex = -1;
 
+  // 记录最近一次已应用的运行时设置，用于检测设置变更并及时应用
+  int _lastInterval = -1;
+  ImageOrientation _lastOrientation = ImageOrientation.followSystem;
+  int _lastControlsHideDelay = -1;
+  bool _lastHideToolbar = true;
+  int _lastInfoHideDelay = -1;
+  bool _lastInfoAutoHide = true;
+
   @override
   void initState() {
     super.initState();
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+
+    // 初始化最近一次设置快照，避免首帧误判为设置变更
+    _lastInterval = settings.interval;
+    _lastOrientation = settings.imageOrientation;
+    _lastControlsHideDelay = settings.controlsHideDelay;
+    _lastHideToolbar = settings.hideToolbar;
+    _lastInfoHideDelay = settings.infoHideDelay;
+    _lastInfoAutoHide = settings.infoAutoHide;
 
     // 注册全局键盘监听器，不依赖 FocusNode
     HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
@@ -81,6 +97,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void didUpdateWidget(covariant PlayerScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     // 避免每次更新都重启定时器
+  }
+
+  /// 检测设置变更并将运行时效果（轮播间隔、屏幕方向、自动隐藏等）即时应用。
+  /// 由于 build 中不能调用 setState，将真正应用动作延迟到本次 build 完成后执行。
+  void _applySettingsToPlayback(SettingsProvider settings) {
+    final intervalChanged = settings.interval != _lastInterval;
+    final orientationChanged = settings.imageOrientation != _lastOrientation;
+    final controlsChanged =
+        settings.controlsHideDelay != _lastControlsHideDelay ||
+        settings.hideToolbar != _lastHideToolbar;
+    final infoChanged =
+        settings.infoHideDelay != _lastInfoHideDelay ||
+        settings.infoAutoHide != _lastInfoAutoHide;
+
+    _lastInterval = settings.interval;
+    _lastOrientation = settings.imageOrientation;
+    _lastControlsHideDelay = settings.controlsHideDelay;
+    _lastHideToolbar = settings.hideToolbar;
+    _lastInfoHideDelay = settings.infoHideDelay;
+    _lastInfoAutoHide = settings.infoAutoHide;
+
+    if (!intervalChanged &&
+        !orientationChanged &&
+        !controlsChanged &&
+        !infoChanged) {
+      return;
+    }
+
+    // 延迟到 build 完成后应用，避免 build 中调用 setState
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (intervalChanged) {
+        _startAutoPlay();
+      }
+      if (orientationChanged) {
+        _applyScreenOrientation(settings);
+      }
+      if (controlsChanged) {
+        _hideControlsDelayed();
+      }
+      if (infoChanged) {
+        _hideInfoDelayed();
+      }
+    });
   }
 
   @override
@@ -1115,6 +1175,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget build(BuildContext context) {
     return Consumer2<SlideProvider, SettingsProvider>(
       builder: (context, slideProvider, settings, child) {
+        // 检测设置变更并即时应用运行时效果（轮播间隔、方向、自动隐藏等）
+        _applySettingsToPlayback(settings);
+
         if (slideProvider.images.isEmpty) {
           return Scaffold(
             backgroundColor: settings.background,

@@ -110,6 +110,76 @@ class MediaStoreService {
     }
   }
 
+  /// 把图片移入系统回收站（而不是永久删除）
+  /// - Android 11+：通过 MediaStore.createTrashRequest 移入系统回收站（图库可见）
+  /// - Android 10 及以下：回退到直接删除
+  /// - Windows：通过 PowerShell 调用 Microsoft.VisualBasic 移入回收站
+  /// 返回 true 表示操作成功（或已移入回收站）
+  static Future<bool> deleteToTrash(List<String> paths) async {
+    if (paths.isEmpty) return true;
+
+    if (Platform.isAndroid) {
+      try {
+        final result = await _channel.invokeMethod('deleteToTrash', {
+          'paths': paths,
+        });
+        return result == true;
+      } catch (e) {
+        debugPrint('[MediaStoreService] deleteToTrash failed: $e');
+        // 回退到直接删除
+        return _deleteFilesDirectly(paths);
+      }
+    }
+
+    if (Platform.isWindows) {
+      return _deleteToTrashWindows(paths);
+    }
+
+    // 其他平台：直接删除
+    return _deleteFilesDirectly(paths);
+  }
+
+  /// Windows 通过 PowerShell 调用 Microsoft.VisualBasic.FileIO 移入回收站
+  static Future<bool> _deleteToTrashWindows(List<String> paths) async {
+    try {
+      final script =
+          '''
+Add-Type -AssemblyName Microsoft.VisualBasic
+\$paths = @(${paths.map((p) => "'${p.replaceAll("'", "''")}'").join(', ')})
+foreach (\$p in \$paths) {
+  if (Test-Path \$p) {
+    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(\$p, 'OnlyErrorDialogs', 'SendToRecycleBin')
+  }
+}
+''';
+      final result = await Process.run('powershell', [
+        '-NoProfile',
+        '-Command',
+        script,
+      ]);
+      return result.exitCode == 0;
+    } catch (e) {
+      debugPrint('[MediaStoreService] deleteToTrashWindows failed: $e');
+      return _deleteFilesDirectly(paths);
+    }
+  }
+
+  /// 直接删除文件（回退方案）
+  static Future<bool> _deleteFilesDirectly(List<String> paths) async {
+    var allOk = true;
+    for (final path in paths) {
+      try {
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {
+        allOk = false;
+      }
+    }
+    return allOk;
+  }
+
   /// 回退方案：扫描常见图片目录（含子目录）
   static Future<List<AlbumInfo>> _fallbackScan() async {
     if (!Platform.isAndroid) return [];

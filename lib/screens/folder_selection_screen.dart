@@ -7,6 +7,7 @@ import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/screens/excluded_images_screen.dart';
+import 'package:slide_show/screens/folder_images_screen.dart';
 import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/l10n/app_localizations.dart';
 
@@ -710,6 +711,15 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                         icon: const Icon(Icons.delete, color: Colors.red),
                         onPressed: () => _removeFolder(path),
                       ),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                FolderImagesScreen(folderPath: path),
+                          ),
+                        );
+                      },
                     );
                   },
                 ),
