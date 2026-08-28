@@ -502,7 +502,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                'V1.2.0',
+                'V1.3.0',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withValues(alpha: 0.3),
