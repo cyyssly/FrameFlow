@@ -3,9 +3,11 @@ package com.example.slide_show
 import android.Manifest
 import android.app.Activity
 import android.content.ContentResolver
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.ContentUris
+import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -16,11 +18,16 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.IOException
+import java.util.Locale
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.slide_show/media_store"
     private var pendingResult: MethodChannel.Result? = null
     private var pendingTrashResult: MethodChannel.Result? = null
+
+    // SAF 目录选择（移动/复制目标）相关
+    private var pendingPickResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -40,6 +47,17 @@ class MainActivity : FlutterActivity() {
                 "deleteToTrash" -> {
                     val paths = call.argument<List<String>>("paths") ?: emptyList()
                     handleDeleteToTrash(paths, result)
+                }
+                "pickDestinationDir" -> pickDestinationDir(result)
+                "copyFiles" -> {
+                    val paths = call.argument<List<String>>("paths") ?: emptyList()
+                    val destinationUri = call.argument<String>("destinationUri") ?: ""
+                    result.success(copyFilesToDestination(paths, destinationUri))
+                }
+                "moveFiles" -> {
+                    val paths = call.argument<List<String>>("paths") ?: emptyList()
+                    val destinationUri = call.argument<String>("destinationUri") ?: ""
+                    result.success(moveFilesToDestination(paths, destinationUri))
                 }
                 else -> result.notImplemented()
             }
@@ -63,11 +81,33 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 200) {
-            // 回收站授权结果
-            val success = resultCode == Activity.RESULT_OK
-            pendingTrashResult?.success(success)
-            pendingTrashResult = null
+        when (requestCode) {
+            200 -> {
+                // 回收站授权结果
+                val success = resultCode == Activity.RESULT_OK
+                pendingTrashResult?.success(success)
+                pendingTrashResult = null
+            }
+            300 -> {
+                // SAF 目录选择结果
+                val pickResult = pendingPickResult
+                pendingPickResult = null
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    val treeUri = data.data
+                    if (treeUri != null) {
+                        // 持久化 uri 权限，以便后续读写该目录
+                        runCatching {
+                            contentResolver.takePersistableUriPermission(
+                                treeUri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            )
+                        }
+                        pickResult?.success(treeUri.toString())
+                        return
+                    }
+                }
+                pickResult?.success(null)
+            }
         }
     }
 
@@ -158,6 +198,134 @@ class MainActivity : FlutterActivity() {
             } catch (e: Exception) {
                 android.util.Log.e("FrameFlow", "delete file failed: $path: ${e.message}")
             }
+        }
+    }
+
+    /// 弹出系统目录选择器（SAF），返回可写目录的 content:// tree uri
+    private fun pickDestinationDir(result: MethodChannel.Result) {
+        if (pendingPickResult != null) {
+            result.error("BUSY", "正在选择目录", null)
+            return
+        }
+        pendingPickResult = result
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                )
+            }
+            startActivityForResult(intent, 300)
+        } catch (e: Exception) {
+            pendingPickResult = null
+            result.error("PICK_FAILED", "无法打开目录选择器: ${e.message}", null)
+        }
+    }
+
+    /// 把文件复制到 SAF tree 目录中
+    /// @return true 表示全部复制成功（或路径为空）
+    private fun copyFilesToDestination(paths: List<String>, destTreeUriString: String): Boolean {
+        if (paths.isEmpty()) return true
+        try {
+            val treeUri = Uri.parse(destTreeUriString)
+            val resolver: ContentResolver = contentResolver
+
+            // 目标目录的 document id
+            val treeDocId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+
+            var allOk = true
+            for (path in paths) {
+                try {
+                    val fileName = path.substringAfterLast('/')
+                    val destDirUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(
+                        treeUri,
+                        treeDocId
+                    )
+
+                    // 创建新文档（图片类型）
+                    val newDocUri = resolver.insert(
+                        destDirUri,
+                        ContentValues().apply {
+                            put(
+                                android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                                fileName
+                            )
+                            put(
+                                android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE,
+                                getMimeType(fileName)
+                            )
+                        }
+                    )
+
+                    if (newDocUri == null) {
+                        android.util.Log.e("FrameFlow", "create doc failed for: $fileName")
+                        allOk = false
+                        continue
+                    }
+
+                    // 从源读取并写入目标文档
+                    val inputStream = openInputStreamFor(path, resolver)
+                    if (inputStream == null) {
+                        allOk = false
+                        continue
+                    }
+                    inputStream.use { ins ->
+                        resolver.openOutputStream(newDocUri)?.use { outs ->
+                            ins.copyTo(outs)
+                        } ?: run {
+                            android.util.Log.e("FrameFlow", "open output failed for: $fileName")
+                            allOk = false
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("FrameFlow", "copy file failed: $path: ${e.message}")
+                    allOk = false
+                }
+            }
+            return allOk
+        } catch (e: Exception) {
+            android.util.Log.e("FrameFlow", "copyFilesToDestination failed: ${e.message}", e)
+            return false
+        }
+    }
+
+    /// 把文件移动到 SAF tree 目录中（复制成功后再删除源文件）
+    private fun moveFilesToDestination(paths: List<String>, destTreeUriString: String): Boolean {
+        if (paths.isEmpty()) return true
+        val copied = copyFilesToDestination(paths, destTreeUriString)
+        if (copied) {
+            deleteFilesDirectly(paths)
+        }
+        return copied
+    }
+
+    /// 打开源文件的输入流：MediaStore 项用 content uri，普通路径用 File
+    private fun openInputStreamFor(path: String, resolver: ContentResolver): java.io.InputStream? {
+        return try {
+            if (path.startsWith("content://")) {
+                resolver.openInputStream(Uri.parse(path))
+            } else {
+                val file = File(path)
+                if (file.exists()) java.io.FileInputStream(file) else null
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FrameFlow", "open input stream failed: $path: ${e.message}")
+            null
+        }
+    }
+
+    /// 根据文件扩展名返回 MIME 类型
+    private fun getMimeType(fileName: String): String {
+        val ext = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        return when (ext) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "bmp" -> "image/bmp"
+            "tiff", "tif" -> "image/tiff"
+            else -> "image/*"
         }
     }
 

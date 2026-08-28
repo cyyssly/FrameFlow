@@ -19,6 +19,7 @@ dependencies:
   url_launcher: ^6.2.4
   ffi: ^2.1.4
   vector_math: ^2.1.4
+  wakelock_plus: ^1.5.2
 
 dev_dependencies:
   flutter_test:

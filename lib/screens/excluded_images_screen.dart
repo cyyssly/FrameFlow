@@ -84,37 +84,43 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
   }
 
   Future<void> _moveImage(ImageItem item) async {
-    final result = await FilePicker.platform.getDirectoryPath();
+    // Android 用 SAF 选择可写目录（tree uri），其他平台用 FilePicker 选择路径
+    final result = await _pickDestination();
     if (result == null) return;
     if (!mounted) return;
-    try {
-      final file = File(item.path);
-      final newPath = '$result\\${item.name}';
-      await file.copy(newPath);
-      await file.delete();
-    } catch (_) {
-      if (mounted) _showSnack(AppLocalizations.of(context).moveFailed);
+    final ok = await MediaStoreService.moveFiles(result, [item.path]);
+    if (!mounted) return;
+    if (!ok) {
+      _showSnack(AppLocalizations.of(context).moveFailed);
       return;
     }
-    if (!mounted) return;
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     settings.removeExcludedPath(item.path);
     setState(() => _excludedItems.removeWhere((i) => i.path == item.path));
   }
 
   Future<void> _copyImage(ImageItem item) async {
-    final result = await FilePicker.platform.getDirectoryPath();
+    // Android 用 SAF 选择可写目录（tree uri），其他平台用 FilePicker 选择路径
+    final result = await _pickDestination();
     if (result == null) return;
     if (!mounted) return;
-    try {
-      final file = File(item.path);
-      final newPath = '$result\\${item.name}';
-      await file.copy(newPath);
-    } catch (_) {
-      if (mounted) _showSnack(AppLocalizations.of(context).copyFailed);
-      return;
+    final ok = await MediaStoreService.copyFiles(result, [item.path]);
+    if (!mounted) return;
+    if (ok) {
+      _showSnack(AppLocalizations.of(context).copySuccess);
+    } else {
+      _showSnack(AppLocalizations.of(context).copyFailed);
     }
-    if (mounted) _showSnack(AppLocalizations.of(context).copySuccess);
+  }
+
+  /// 选择移动/复制目标目录。
+  /// Android 用原生 SAF 返回 content:// tree uri；其他平台用 FilePicker 返回路径。
+  /// @return 目标标识（tree uri 或路径），取消返回 null
+  Future<String?> _pickDestination() async {
+    if (Platform.isAndroid) {
+      return MediaStoreService.pickDestinationDir();
+    }
+    return FilePicker.platform.getDirectoryPath();
   }
 
   // ── 批量操作 ──
@@ -140,19 +146,19 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
   }
 
   Future<void> _moveAll() async {
-    final result = await FilePicker.platform.getDirectoryPath();
+    final result = await _pickDestination();
     if (result == null) return;
     if (!mounted) return;
     final items = List<ImageItem>.from(_excludedItems);
-    for (final item in items) {
-      try {
-        final file = File(item.path);
-        final newPath = '$result\\${item.name}';
-        await file.copy(newPath);
-        await file.delete();
-      } catch (_) {}
-    }
+    final ok = await MediaStoreService.moveFiles(
+      result,
+      items.map((e) => e.path).toList(),
+    );
     if (!mounted) return;
+    if (!ok) {
+      _showSnack(AppLocalizations.of(context).moveFailed);
+      return;
+    }
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     settings.clearExcludedPaths();
     setState(() => _excludedItems.clear());
@@ -160,19 +166,20 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
   }
 
   Future<void> _copyAll() async {
-    final result = await FilePicker.platform.getDirectoryPath();
+    final result = await _pickDestination();
     if (result == null) return;
     if (!mounted) return;
     final items = List<ImageItem>.from(_excludedItems);
-    for (final item in items) {
-      try {
-        final file = File(item.path);
-        final newPath = '$result\\${item.name}';
-        await file.copy(newPath);
-      } catch (_) {}
-    }
+    final ok = await MediaStoreService.copyFiles(
+      result,
+      items.map((e) => e.path).toList(),
+    );
     if (!mounted) return;
-    _showSnack(AppLocalizations.of(context).copiedAllTo);
+    if (ok) {
+      _showSnack(AppLocalizations.of(context).copiedAllTo);
+    } else {
+      _showSnack(AppLocalizations.of(context).copyFailed);
+    }
   }
 
   void _showSnack(String msg) {

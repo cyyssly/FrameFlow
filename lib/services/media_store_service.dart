@@ -293,4 +293,87 @@ foreach (\$p in \$paths) {
     albums.sort((a, b) => b.imageCount.compareTo(a.imageCount));
     return albums;
   }
+
+  // ── 移动 / 复制（支持 Android SAF 方式写入外部目录） ──
+
+  /// 弹出系统目录选择器（Android 用 SAF 选择可写目录，获得返回的 tree uri）。
+  /// 其他平台通过 FilePicker 由调用方处理。
+  /// @return 选中目录的 tree uri（content://...），取消返回 null
+  static Future<String?> pickDestinationDir() async {
+    if (!Platform.isAndroid) return null; // 非 Android 由上层用 FilePicker
+    try {
+      final result = await _channel.invokeMethod('pickDestinationDir');
+      return result as String?;
+    } catch (e) {
+      debugPrint('[MediaStoreService] pickDestinationDir failed: $e');
+      return null;
+    }
+  }
+
+  /// 把 [paths] 中的文件复制到 [destinationUri]（SAF tree uri）。
+  /// 返回 true 表示全部成功（或列表为空）。
+  static Future<bool> copyFiles(
+    String destinationUri,
+    List<String> paths,
+  ) async {
+    if (paths.isEmpty) return true;
+    if (Platform.isAndroid) {
+      try {
+        final result = await _channel.invokeMethod('copyFiles', {
+          'paths': paths,
+          'destinationUri': destinationUri,
+        });
+        return result == true;
+      } catch (e) {
+        debugPrint('[MediaStoreService] copyFiles failed: $e');
+        return false;
+      }
+    }
+    // 非 Android（桌面端）：直接文件复制
+    var allOk = true;
+    for (final path in paths) {
+      try {
+        final file = File(path);
+        final name = path.split(Platform.pathSeparator).last;
+        await file.copy('$destinationUri${Platform.pathSeparator}$name');
+      } catch (_) {
+        allOk = false;
+      }
+    }
+    return allOk;
+  }
+
+  /// 把 [paths] 中的文件移动到 [destinationUri]（SAF tree uri）。
+  /// 返回 true 表示全部成功（或列表为空）。
+  static Future<bool> moveFiles(
+    String destinationUri,
+    List<String> paths,
+  ) async {
+    if (paths.isEmpty) return true;
+    if (Platform.isAndroid) {
+      try {
+        final result = await _channel.invokeMethod('moveFiles', {
+          'paths': paths,
+          'destinationUri': destinationUri,
+        });
+        return result == true;
+      } catch (e) {
+        debugPrint('[MediaStoreService] moveFiles failed: $e');
+        return false;
+      }
+    }
+    // 非 Android（桌面端）：复制后删除源文件
+    var allOk = true;
+    for (final path in paths) {
+      try {
+        final file = File(path);
+        final name = path.split(Platform.pathSeparator).last;
+        await file.copy('$destinationUri${Platform.pathSeparator}$name');
+        await file.delete();
+      } catch (_) {
+        allOk = false;
+      }
+    }
+    return allOk;
+  }
 }

@@ -13,6 +13,7 @@ import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/services/media_store_service.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
@@ -51,6 +52,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+
+    // 播放时保持屏幕常亮，避免进入省电模式自动熄屏
+    WakelockPlus.enable();
 
     // 初始化最近一次设置快照，避免首帧误判为设置变更
     _lastInterval = settings.interval;
@@ -150,6 +154,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideInfoTimer?.cancel();
     // 移除全局键盘监听器
     HardwareKeyboard.instance.removeHandler(_hardwareKeyHandler);
+
+    // 释放屏幕常亮，恢复系统正常熄屏行为
+    WakelockPlus.disable();
 
     // 确保退出全屏状态，但不调用 setState
     if (_isFullscreen) {
