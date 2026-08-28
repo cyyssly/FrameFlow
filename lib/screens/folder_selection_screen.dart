@@ -369,6 +369,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       }
     }
     return ListTile(
+      key: const ValueKey('excluded-vfolder'),
       // 右侧边距缩小，让 > 图标更靠右，与左侧缩略图边距更平衡
       contentPadding: const EdgeInsets.only(left: 16, right: 4),
       leading: ClipRRect(
@@ -686,6 +687,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                     final folderIndex = hasExcluded ? index - 1 : index;
                     final path = slideProvider.folderPaths[folderIndex];
                     return ListTile(
+                      // 使用稳定的 Key 绑定到文件夹路径，避免 ListView 按位置复用 State，
+                      // 导致缩略图组件残留上一个位置的图片
+                      key: ValueKey('folder-$path'),
                       // 右侧边距缩小，让删除按钮更靠右，与左侧缩略图边距更平衡
                       contentPadding: const EdgeInsets.only(left: 16, right: 4),
                       leading: ClipRRect(
@@ -880,7 +884,11 @@ class _ThumbnailImageState extends State<_ThumbnailImage> {
   @override
   void didUpdateWidget(covariant _ThumbnailImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.thumbnailPath != widget.thumbnailPath) {
+    // 只要缩略图来源（缩略图路径或所属相册/文件夹路径）发生变化就要重新加载。
+    // 否则 ListView 按位置复用 State 时，会残留上一个条目的缩略图，
+    // 导致所有文件夹都显示成同一张被排除的图片。
+    if (oldWidget.thumbnailPath != widget.thumbnailPath ||
+        oldWidget.albumPath != widget.albumPath) {
       _loadThumbnail();
     }
   }
@@ -889,6 +897,10 @@ class _ThumbnailImageState extends State<_ThumbnailImage> {
     setState(() {
       _loading = true;
     });
+
+    // 记录本次加载对应的"请求标识"，防止异步加载完成时覆盖了更新的结果
+    final requestAlbumPath = widget.albumPath;
+    final requestThumbnailPath = widget.thumbnailPath;
 
     try {
       // 优先使用原生端返回的 content:// URI 或文件路径
@@ -926,11 +938,16 @@ class _ThumbnailImageState extends State<_ThumbnailImage> {
       }
     } catch (_) {}
 
-    if (mounted) {
-      setState(() {
-        _loading = false;
-      });
+    // 如果在加载期间 widget 已被复用指向其他文件夹，丢弃本次结果
+    if (!mounted ||
+        requestAlbumPath != widget.albumPath ||
+        requestThumbnailPath != widget.thumbnailPath) {
+      return;
     }
+
+    setState(() {
+      _loading = false;
+    });
   }
 
   @override

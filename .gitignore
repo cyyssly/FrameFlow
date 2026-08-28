@@ -7,6 +7,8 @@
 /FrameFlow.exe
 /FrameFlow.apk
 **/build/
+# Release distribution artifacts
+/release/
 *.bak
 .DS_Store
 .atom/
