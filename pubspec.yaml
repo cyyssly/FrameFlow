@@ -12,7 +12,10 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  file_picker: ^8.3.7
+  # 9.0.1 起 getDirectoryPath() 在独立 isolate 中初始化/释放 COM，
+  # 修复了 Windows 上主线程 CoUninitialize 导致的原生崩溃（comdlg32.dll 0xc0000005）。
+  # 注意：10.1.1+ 起 Android 实现迁移到 Kotlin，与 AGP 9 存在兼容问题，暂不升级到 10.x。
+  file_picker: ^9.0.3
   shared_preferences: ^2.2.2
   provider: ^6.1.1
   image: ^4.1.7

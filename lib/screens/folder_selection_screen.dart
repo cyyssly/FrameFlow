@@ -1,13 +1,13 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/screens/excluded_images_screen.dart';
 import 'package:slide_show/screens/folder_images_screen.dart';
+import 'package:slide_show/services/directory_picker_service.dart';
 import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/l10n/app_localizations.dart';
 
@@ -26,7 +26,23 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
   // 跟踪正在计数的文件夹
   final Set<String> _scanningFolders = {};
 
+  /// 是否正在添加文件夹（含原生对话框弹出期间），用于防止重复触发
+  bool _isAddingFolder = false;
+
   Future<void> _addFolder() async {
+    // 防止重复触发（例如快速双击“添加文件夹”按钮）并发打开原生对话框。
+    // Windows 原生目录对话框不允许并发打开，否则会触发 Shell 访问冲突，
+    // 导致进程直接退出（Dart 层无法捕获）。
+    if (_isAddingFolder) return;
+    _isAddingFolder = true;
+    try {
+      await _addFolderImpl();
+    } finally {
+      _isAddingFolder = false;
+    }
+  }
+
+  Future<void> _addFolderImpl() async {
     if (Platform.isAndroid) {
       // Android 端使用 MediaStore 读取相册列表
       final hasPermission = await MediaStoreService.requestStoragePermission();
@@ -165,8 +181,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         }
       }
     } else {
-      // 桌面端使用 FilePicker
-      final result = await FilePicker.platform.getDirectoryPath();
+      // 桌面端使用原生目录选择对话框（带互斥保护，避免重复弹窗导致原生崩溃）
+      final result = await DirectoryPickerService.pickDirectory();
       if (result != null) {
         if (!mounted) return;
         final slideProvider = Provider.of<SlideProvider>(
