@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/settings_provider.dart';
+import 'package:slide_show/services/directory_picker_service.dart';
 import 'package:slide_show/services/image_scan_service.dart';
 import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/widgets/masonry_image_grid.dart';
@@ -20,6 +21,9 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
   List<ImageItem> _excludedItems = [];
   bool _isLoading = true;
   int? _selectedIndex;
+
+  /// 每批处理的图片数量，避免一次性读取过多元数据/解码过多图片
+  static const _batchSize = 30;
 
   @override
   void initState() {
@@ -42,24 +46,51 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
       _excludedItems = items;
       _isLoading = false;
     });
-    // 异步读取每张图片的宽高比，用于瀑布流布局
-    for (final item in items) {
-      _loadAspectRatio(item);
+    // 分批读取宽高比并预解码像素，滚动时无需等待
+    unawaited(_loadMetadataAndPrecache(items));
+  }
+
+  /// 分批读取宽高比并预解码像素。
+  /// 逐张调用 [ImageScanService.readAspectRatio] 会为每张图创建一个 isolate，
+  /// 这里改为按批并行读取；同时真正把像素解码进 ImageCache，
+  /// 否则滚动到新卡片时仍需现场解码，表现为卡顿。
+  Future<void> _loadMetadataAndPrecache(List<ImageItem> items) async {
+    for (var start = 0; start < items.length; start += _batchSize) {
+      if (!mounted) return;
+      final end = (start + _batchSize).clamp(0, items.length);
+      final batch = items.sublist(start, end);
+      final ratios = await ImageScanService.readAspectRatios(
+        batch.map((e) => e.path).toList(),
+      );
+      if (!mounted) return;
+      setState(() {
+        for (var i = 0; i < batch.length; i++) {
+          final ratio = ratios[i];
+          if (ratio == null) continue;
+          final item = batch[i];
+          final index = _excludedItems.indexWhere((e) => e.path == item.path);
+          if (index < 0) continue;
+          final updated = ImageItem(
+            name: item.name,
+            path: item.path,
+            aspectRatio: ratio,
+          );
+          _excludedItems[index] = updated;
+          batch[i] = updated;
+        }
+      });
+      // 宽高比已就绪，再预解码像素
+      await _precacheBatch(batch);
     }
   }
 
-  Future<void> _loadAspectRatio(ImageItem item) async {
-    final ratio = await ImageScanService.readAspectRatio(item.path);
+  /// 预解码一批图片的像素，填充 [ImageCache]
+  Future<void> _precacheBatch(List<ImageItem> batch) async {
     if (!mounted) return;
-    final index = _excludedItems.indexWhere((i) => i.path == item.path);
-    if (index < 0) return;
-    setState(() {
-      _excludedItems[index] = ImageItem(
-        name: item.name,
-        path: item.path,
-        aspectRatio: ratio,
-      );
-    });
+    await MasonryImageGrid.precacheAll(
+      batch.map((e) => e.path).toList(),
+      context,
+    );
   }
 
   // ── 单图操作 ──
@@ -120,7 +151,7 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
     if (Platform.isAndroid) {
       return MediaStoreService.pickDestinationDir();
     }
-    return FilePicker.platform.getDirectoryPath();
+    return DirectoryPickerService.pickDirectory();
   }
 
   // ── 批量操作 ──

@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/settings_provider.dart';
+import 'package:slide_show/services/directory_picker_service.dart';
 import 'package:slide_show/services/image_scan_service.dart';
 import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/widgets/masonry_image_grid.dart';
@@ -32,7 +33,7 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   /// 每批加载的图片数量
   static const _pageSize = 30;
 
-  /// 已加载到内存的图片数量（含预加载的下一批）
+  /// 已加载到内存的图片数量（宽高比与预解码都已就绪）
   int _loadedCount = 0;
 
   /// 是否正在预加载（防止重复触发）
@@ -54,39 +55,51 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     setState(() {
       _allItems = items;
       _items = items.take(_pageSize).toList();
-      _loadedCount = _pageSize;
+      // 图片不足一页时不要记成 30，否则 _loadMore 会取到空区间
+      _loadedCount = items.length.clamp(0, _pageSize);
       _isLoading = false;
     });
-    // 串行读取当前批次的宽高比（后台执行，不阻塞 UI）
-    _loadAspectRatios(_items);
+    // 首批：先读出宽高比（决定卡片高度），再真正预解码像素
+    await _loadAspectRatios(_items);
+    // 预解码当前批，首屏没有滚动通知，必须主动解码
+    unawaited(_precacheBatch(_items));
     // 预加载下一批，保证滚动时无需等待
-    _preloadNextBatch();
+    unawaited(_preloadNextBatch());
   }
 
-  /// 预加载下一批图片到内存（不显示，仅读取宽高比）
+  /// 预加载下一批：
+  /// 1. 先读出该批的宽高比（决定卡片高度）
+  /// 2. 真正解码像素（填充 ImageCache），这是消除滚动卡顿的关键
+  /// 3. 两者都就绪后才把该批标记为"可显示"，避免卡片先按正方形渲染再重排跳变
   Future<void> _preloadNextBatch() async {
     if (_isPreloading) return;
     if (_loadedCount >= _allItems.length) return;
     _isPreloading = true;
-    final start = _loadedCount;
-    final end = (start + _pageSize).clamp(0, _allItems.length);
-    _loadedCount = end;
-    final batch = _allItems.sublist(start, end);
-    // 后台串行读取宽高比
-    await _loadAspectRatios(batch);
-    _isPreloading = false;
+    try {
+      final start = _loadedCount;
+      final end = (start + _pageSize).clamp(0, _allItems.length);
+      final batch = _allItems.sublist(start, end);
+      await _loadAspectRatios(batch);
+      await _precacheBatch(batch);
+      // 宽高比与像素都已就绪，才允许 _loadMore 把这一批显示出来
+      _loadedCount = end;
+    } finally {
+      _isPreloading = false;
+    }
   }
 
-  /// 滚动到底部时：立即显示已预加载的图片，并预加载下一批
+  /// 滚动接近底部时：立即显示已预加载的图片，并预加载下一批
   void _loadMore() {
     if (_items.length >= _allItems.length) return;
-    // 显示已预加载的图片（立即，无延迟）
+    // 显示已预加载的图片（宽高比与像素都已就绪，无跳变、无卡顿）
     final newItems = _allItems.sublist(_items.length, _loadedCount);
-    setState(() {
-      _items.addAll(newItems);
-    });
+    if (newItems.isNotEmpty) {
+      setState(() {
+        _items.addAll(newItems);
+      });
+    }
     // 预加载下一批
-    _preloadNextBatch();
+    unawaited(_preloadNextBatch());
   }
 
   /// 串行读取一批图片的宽高比，完成后一次性更新（避免频繁 setState）
@@ -111,8 +124,19 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
         // 更新显示列表
         final index = _items.indexWhere((e) => e.path == item.path);
         if (index >= 0) _items[index] = updated;
+        // 同步 batch 内的对象，保证调用方能拿到带宽高比的新对象
+        batch[i] = updated;
       }
     });
+  }
+
+  /// 预解码指定图片的像素，填充 [ImageCache]
+  Future<void> _precacheBatch(List<ImageItem> batch) async {
+    if (!mounted || batch.isEmpty) return;
+    await MasonryImageGrid.precacheAll(
+      batch.map((e) => e.path).toList(),
+      context,
+    );
   }
 
   // ── 单图操作 ──
@@ -178,7 +202,7 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     if (Platform.isAndroid) {
       return MediaStoreService.pickDestinationDir();
     }
-    return FilePicker.platform.getDirectoryPath();
+    return DirectoryPickerService.pickDirectory();
   }
 
   // ── 批量操作（作用于全部图片） ──

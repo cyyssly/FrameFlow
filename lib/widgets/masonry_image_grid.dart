@@ -7,6 +7,43 @@ import 'package:slide_show/models/image_item.dart';
 
 /// 瀑布流网格组件：固定列宽，高度按图片宽高比自适应
 class MasonryImageGrid extends StatelessWidget {
+  /// 单个卡片的参考显示宽度（逻辑像素），用于换算解码宽度。
+  static const double tileReferenceWidth = 400;
+
+  /// 卡片图片的解码宽度（物理像素）。
+  /// 预解码与卡片渲染必须使用同一个值，否则 ImageCache 的键不一致，预解码就白做了。
+  static int decodeWidthFor(BuildContext context) =>
+      (tileReferenceWidth * MediaQuery.of(context).devicePixelRatio).round();
+
+  /// 构造卡片使用的 [ImageProvider]，等价于
+  /// `Image.file(File(path), cacheWidth: decodeWidthFor(context)).image`。
+  static ImageProvider imageProviderFor(String path, BuildContext context) =>
+      ResizeImage(FileImage(File(path)), width: decodeWidthFor(context));
+
+  /// 把一批图片真正解码进 [ImageCache]，滚动到它们时即可直接命中缓存。
+  /// 仅读取宽高比不会解码像素，必须调用本方法才能消除滚动卡顿。
+  /// [concurrency] 为同时解码的张数，过大反而会互相抢占 IO 与解码线程。
+  static Future<void> precacheAll(
+    List<String> paths,
+    BuildContext context, {
+    int concurrency = 4,
+  }) async {
+    for (var i = 0; i < paths.length; i += concurrency) {
+      if (!context.mounted) return;
+      final chunk = paths.skip(i).take(concurrency);
+      await Future.wait(
+        chunk.map(
+          (path) => precacheImage(
+            imageProviderFor(path, context),
+            context,
+            // 单张失败（损坏/已被删除）不影响其余图片
+            onError: (_, _) {},
+          ),
+        ),
+      );
+    }
+  }
+
   final List<ImageItem> items;
   final int? selectedIndex;
   final ValueChanged<int> onTap;
@@ -26,6 +63,10 @@ class MasonryImageGrid extends StatelessWidget {
   /// 滚动接近底部时触发，用于动态加载更多
   final VoidCallback? onLoadMore;
 
+  /// 距底部多少逻辑像素时触发 [onLoadMore]。默认 1.5 倍视口高度，
+  /// 留足解码时间，避免"滚到底才开始解码"造成的卡顿。
+  final double? prefetchExtent;
+
   const MasonryImageGrid({
     super.key,
     required this.items,
@@ -40,16 +81,18 @@ class MasonryImageGrid extends StatelessWidget {
     required this.primaryTooltip,
     this.hasMore = false,
     this.onLoadMore,
+    this.prefetchExtent,
   });
 
   @override
   Widget build(BuildContext context) {
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
-        // 滚动接近底部（剩余 < 300px）且还有更多时触发加载
-        if (hasMore &&
-            onLoadMore != null &&
-            notification.metrics.extentAfter < 300) {
+        // 滚动接近底部且还有更多时触发加载。
+        // 默认预留 1.5 倍视口高度，让下一批有充足的时间读取宽高比并预解码。
+        final metrics = notification.metrics;
+        final threshold = prefetchExtent ?? metrics.viewportDimension * 1.5;
+        if (hasMore && onLoadMore != null && metrics.extentAfter < threshold) {
           onLoadMore!();
         }
         return false;
@@ -72,6 +115,16 @@ class MasonryImageGrid extends StatelessWidget {
                     aspectRatios: items.map((e) => e.aspectRatio).toList(),
                   ),
                   delegate: SliverChildBuilderDelegate((context, index) {
+                    // 兜底：内容不足一屏时不会有滚动通知，
+                    // 构建到末尾附近的两行时主动触发加载更多
+                    if (hasMore &&
+                        onLoadMore != null &&
+                        index >= items.length - crossAxisCount * 2) {
+                      final loadMore = onLoadMore!;
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (context.mounted) loadMore();
+                      });
+                    }
                     return _MasonryImageCard(
                       item: items[index],
                       isSelected: selectedIndex == index,
@@ -144,10 +197,6 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
 
   @override
   Widget build(BuildContext context) {
-    // 根据设备像素比计算解码宽度，保证清晰度同时避免解码全尺寸大图
-    // 卡片显示宽度约 400px，乘以 DPR 得到物理像素宽度
-    final dpr = MediaQuery.of(context).devicePixelRatio;
-    final decodeWidth = (400 * dpr).round();
     return GestureDetector(
       onTap: widget.onTap,
       child: MouseRegion(
@@ -166,13 +215,16 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                Image.file(
-                  File(widget.item.path),
+                Image(
+                  // 与预解码共用同一个 Provider（含相同的 cacheWidth），
+                  // 卡片滚动到可见区域时可直接命中 ImageCache，无需重新解码
+                  image: MasonryImageGrid.imageProviderFor(
+                    widget.item.path,
+                    context,
+                  ),
                   fit: BoxFit.fill,
                   width: double.infinity,
                   height: double.infinity,
-                  // 按 DPR 动态限制解码宽度，保证清晰度同时避免解码全尺寸大图
-                  cacheWidth: decodeWidth,
                   errorBuilder: (_, _, _) => const Icon(Icons.broken_image),
                 ),
                 // 悬停 或 选中 时显示覆盖层
