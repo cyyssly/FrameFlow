@@ -434,7 +434,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _nextImage() {
+  /// 切换下一张图片。
+  /// [manual] 为 true 表示由用户手动触发（键盘/滚轮/滑动/工具栏按钮），
+  /// 切换后需要重置自动播放计时器。
+  void _nextImage({bool manual = false}) {
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
     if (_scale != 1.0) {
       setState(() {
@@ -486,6 +489,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // 顺序/最新优先/最旧优先统一使用顺序索引播放
       slideProvider.nextImage();
     }
+
+    // 手动切换后重置自动播放计时器，让下一张的等待时间从当前时刻重新计算
+    if (manual) {
+      _startAutoPlay();
+    }
+  }
+
+  /// 手动切换到上一张图片（键盘/滚轮/滑动/工具栏按钮触发）。
+  /// 切换后重置自动播放计时器，让等待时间从当前时刻重新计算。
+  void _prevImage() {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    Provider.of<SlideProvider>(
+      context,
+      listen: false,
+    ).prevImage(playOrder: settings.playOrder);
+    _startAutoPlay();
   }
 
   void _hideControlsDelayed() {
@@ -925,17 +944,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _togglePlay();
           return true;
         case LogicalKeyboardKey.arrowLeft:
-          final settings = Provider.of<SettingsProvider>(
-            context,
-            listen: false,
-          );
-          Provider.of<SlideProvider>(
-            context,
-            listen: false,
-          ).prevImage(playOrder: settings.playOrder);
+          _prevImage();
           return true;
         case LogicalKeyboardKey.arrowRight:
-          _nextImage();
+          _nextImage(manual: true);
           return true;
         case LogicalKeyboardKey.escape:
           // 全屏时按 ESC 退出全屏；非全屏时按 ESC 退出播放
@@ -971,12 +983,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (settings.wheelSwitchImage) {
         // 滚轮切换图片（不触发工具栏显示）
         if (event.scrollDelta.dy > 0) {
-          _nextImage();
+          _nextImage(manual: true);
         } else if (event.scrollDelta.dy < 0) {
-          Provider.of<SlideProvider>(
-            context,
-            listen: false,
-          ).prevImage(playOrder: settings.playOrder);
+          _prevImage();
         }
       } else {
         // 滚轮缩放图片
@@ -1215,9 +1224,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 },
                 onHorizontalDragEnd: (details) {
                   if (details.primaryVelocity! > 50) {
-                    slideProvider.prevImage(playOrder: settings.playOrder);
+                    _prevImage();
                   } else if (details.primaryVelocity! < -50) {
-                    _nextImage();
+                    _nextImage(manual: true);
                   }
                 },
                 onScaleStart: _handleScaleStart,
@@ -1405,14 +1414,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ),
                                     color: Colors.white,
                                     onPressed: () {
-                                      final settings =
-                                          Provider.of<SettingsProvider>(
-                                            context,
-                                            listen: false,
-                                          );
-                                      slideProvider.prevImage(
-                                        playOrder: settings.playOrder,
-                                      );
+                                      _prevImage();
                                       _showControlsTemporarily();
                                     },
                                   ),
@@ -1432,7 +1434,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     icon: const Icon(Icons.skip_next, size: 36),
                                     color: Colors.white,
                                     onPressed: () {
-                                      _nextImage();
+                                      _nextImage(manual: true);
                                       _showControlsTemporarily();
                                     },
                                   ),
