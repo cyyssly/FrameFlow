@@ -180,16 +180,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Android 端通过 MediaStore 查询（绕过 Scoped Storage 限制）
     if (Platform.isAndroid) {
+      // 直接透传 ImageItem，保留 MediaStore 已索引好的宽高比
       final images = await MediaStoreService.getFolderImages(folderPath);
-      return images
-          .where((item) {
-            final dotIndex = item.path.lastIndexOf('.');
-            if (dotIndex == -1) return false;
-            final ext = item.path.toLowerCase().substring(dotIndex + 1);
-            return supportedExtensions.contains(ext);
-          })
-          .map((item) => ImageItem(name: item.name, path: item.path))
-          .toList();
+      return images.where((item) {
+        final dotIndex = item.path.lastIndexOf('.');
+        if (dotIndex == -1) return false;
+        final ext = item.path.toLowerCase().substring(dotIndex + 1);
+        return supportedExtensions.contains(ext);
+      }).toList();
     }
 
     // 桌面端使用文件系统 API
@@ -502,7 +500,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                'V1.3.0',
+                'V1.3.1',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withValues(alpha: 0.3),

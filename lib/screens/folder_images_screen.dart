@@ -102,16 +102,38 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     unawaited(_preloadNextBatch());
   }
 
-  /// 串行读取一批图片的宽高比，完成后一次性更新（避免频繁 setState）
+  /// 读取一批图片的宽高比，完成后一次性更新（避免频繁 setState）
+  ///
+  /// Android 端 MediaStore 已直接给出宽高比，只有未索引到尺寸的图片
+  /// 才需要走文件解析，因此这里先过滤再解析。
   Future<void> _loadAspectRatios(List<ImageItem> batch) async {
-    final ratios = await ImageScanService.readAspectRatios(
-      batch.map((e) => e.path).toList(),
-    );
+    final pendingIndexes = <int>[];
+    final pendingPaths = <String>[];
+    for (var i = 0; i < batch.length; i++) {
+      if (batch[i].aspectRatio == null) {
+        pendingIndexes.add(i);
+        pendingPaths.add(batch[i].path);
+      }
+    }
+    if (pendingPaths.isEmpty) return;
+
+    final ratios = await ImageScanService.readAspectRatios(pendingPaths);
     if (!mounted) return;
     setState(() {
-      for (var i = 0; i < batch.length; i++) {
-        final ratio = ratios[i];
+      // 建立 路径→索引 映射，避免逐项 indexWhere 导致 O(n²)
+      final allIndexByPath = <String, int>{};
+      for (var i = 0; i < _allItems.length; i++) {
+        allIndexByPath[_allItems[i].path] = i;
+      }
+      final itemIndexByPath = <String, int>{};
+      for (var i = 0; i < _items.length; i++) {
+        itemIndexByPath[_items[i].path] = i;
+      }
+
+      for (var k = 0; k < pendingPaths.length; k++) {
+        final ratio = ratios[k];
         if (ratio == null) continue;
+        final i = pendingIndexes[k];
         final item = batch[i];
         final updated = ImageItem(
           name: item.name,
@@ -119,11 +141,11 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
           aspectRatio: ratio,
         );
         // 更新全部列表
-        final allIndex = _allItems.indexWhere((e) => e.path == item.path);
-        if (allIndex >= 0) _allItems[allIndex] = updated;
+        final allIndex = allIndexByPath[item.path];
+        if (allIndex != null) _allItems[allIndex] = updated;
         // 更新显示列表
-        final index = _items.indexWhere((e) => e.path == item.path);
-        if (index >= 0) _items[index] = updated;
+        final index = itemIndexByPath[item.path];
+        if (index != null) _items[index] = updated;
         // 同步 batch 内的对象，保证调用方能拿到带宽高比的新对象
         batch[i] = updated;
       }

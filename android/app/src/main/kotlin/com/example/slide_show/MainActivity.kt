@@ -71,9 +71,18 @@ class MainActivity : FlutterActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 100) {
-            // 只要有一个权限被授予，就认为可以读取（部分照片也能用）
+            // Android 14+ 用户可能只选择“部分照片”，此时只有
+            // READ_MEDIA_VISUAL_USER_SELECTED 被授予。
+            // 这种情况仍允许继续使用，但要记录日志，
+            // 因为后续查询结果会是不完整的（相册数量/缩略图会时多时少）。
             val granted = grantResults.isNotEmpty() &&
                 grantResults.any { it == PackageManager.PERMISSION_GRANTED }
+            if (granted && !hasFullStoragePermission()) {
+                android.util.Log.w(
+                    "FrameFlow",
+                    "requestStoragePermission: 仅获取到部分照片访问权限，结果可能不完整"
+                )
+            }
             pendingResult?.success(granted)
             pendingResult = null
         }
@@ -335,6 +344,13 @@ class MainActivity : FlutterActivity() {
             result.error("PERMISSION_DENIED", "没有读取图片的权限", null)
             return
         }
+        if (hasPartialStoragePermission()) {
+            // 部分权限下查询结果只是用户勾选的子集，记录日志便于区分原因
+            android.util.Log.w(
+                "FrameFlow",
+                "getImageAlbums: 仅有部分照片访问权限，结果可能不完整"
+            )
+        }
         try {
             val albums = queryImageAlbums()
             android.util.Log.d("FrameFlow", "getImageAlbums: returning ${albums.size} albums")
@@ -349,7 +365,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun handleRequestPermission(result: MethodChannel.Result) {
-        if (hasStoragePermission()) {
+        if (hasFullStoragePermission()) {
             result.success(true)
             return
         }
@@ -401,8 +417,14 @@ class MainActivity : FlutterActivity() {
     }
 
     /// 通过 MediaStore ContentResolver 按文件夹路径查询图片
-    private fun queryFolderImages(folderPath: String): List<Map<String, Any>> {
-        val images = mutableListOf<Map<String, Any>>()
+    ///
+    /// 同时把 MediaStore 已索引好的 WIDTH / HEIGHT 一并返回。
+    /// 瀑布流需要每张图的宽高比来决定卡片高度，原先的做法是在 Dart 端
+    /// 把整张原图读进内存再解析——手机上每张几 MB、一批 30 张，会明显拖慢加载。
+    /// MediaStore 的 WIDTH/HEIGHT 与 image 包解析出的原始尺寸语义一致
+    /// （都不含 EXIF 旋转），因此可以直接使用。
+    private fun queryFolderImages(folderPath: String): List<Map<String, Any?>> {
+        val images = mutableListOf<Map<String, Any?>>()
         val contentResolver: ContentResolver = contentResolver
 
         // 把文件夹路径转为 relative_path 格式
@@ -420,7 +442,9 @@ class MainActivity : FlutterActivity() {
 
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATA
+            MediaStore.Images.Media.DATA,
+            MediaStore.Images.Media.WIDTH,
+            MediaStore.Images.Media.HEIGHT
         )
 
         // 查询条件：相对路径匹配，或 DATA 列以文件夹路径开头
@@ -447,6 +471,8 @@ class MainActivity : FlutterActivity() {
         cursor?.use {
             val idIdx = it.getColumnIndex(MediaStore.Images.Media._ID)
             val dataIdx = it.getColumnIndex(MediaStore.Images.Media.DATA)
+            val widthIdx = it.getColumnIndex(MediaStore.Images.Media.WIDTH)
+            val heightIdx = it.getColumnIndex(MediaStore.Images.Media.HEIGHT)
             if (idIdx < 0) return@use
 
             while (it.moveToNext()) {
@@ -456,10 +482,20 @@ class MainActivity : FlutterActivity() {
                 }
                 if (imagePath == null || imagePath.isBlank()) continue
 
+                // WIDTH/HEIGHT 可能为 0（MediaStore 尚未扫描到该文件），
+                // 此时返回 null，由 Dart 端回退到读取文件头解析
+                var aspectRatio: Double? = null
+                if (widthIdx >= 0 && heightIdx >= 0) {
+                    val w = it.getInt(widthIdx)
+                    val h = it.getInt(heightIdx)
+                    if (w > 0 && h > 0) aspectRatio = w.toDouble() / h.toDouble()
+                }
+
                 images.add(
                     mapOf(
                         "name" to imagePath.substringAfterLast('/'),
-                        "path" to imagePath
+                        "path" to imagePath,
+                        "aspectRatio" to aspectRatio
                     )
                 )
             }
@@ -468,12 +504,37 @@ class MainActivity : FlutterActivity() {
         return images
     }
 
-    private fun hasStoragePermission(): Boolean {
-        val permissions = getRequiredPermissions()
-        return permissions.any { permission ->
-            ContextCompat.checkSelfPermission(this, permission) ==
-                PackageManager.PERMISSION_GRANTED
+    /// 是否拥有“完整”的图片读取权限
+    private fun hasFullStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            isGranted(Manifest.permission.READ_MEDIA_IMAGES)
+        } else {
+            isGranted(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
+    }
+
+    /// 是否只拿到“部分照片”访问权限（Android 14+ 用户选择“仅允许访问部分照片”）
+    ///
+    /// 这种状态下 MediaStore 只会返回用户勾选过的那部分图片，
+    /// 相册数量、图片数量和缩略图都不完整，且会随用户选择而变化。
+    private fun hasPartialStoragePermission(): Boolean {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            !isGranted(Manifest.permission.READ_MEDIA_IMAGES) &&
+            isGranted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+    }
+
+    /// 是否可以进行 MediaStore 查询（完整权限或部分权限都算）。
+    ///
+    /// 注意不能简单地用 any 判断后就当成“完整权限”：
+    /// 部分权限下结果只是用户勾选的子集，必须显式区分并记录日志，
+    /// 否则现象会表现为相册/缩略图时多时少、对不上号。
+    private fun hasStoragePermission(): Boolean {
+        return hasFullStoragePermission() || hasPartialStoragePermission()
+    }
+
+    private fun isGranted(permission: String): Boolean {
+        return ContextCompat.checkSelfPermission(this, permission) ==
+            PackageManager.PERMISSION_GRANTED
     }
 
     private fun getRequiredPermissions(): Array<String> {
@@ -561,7 +622,10 @@ class MainActivity : FlutterActivity() {
                     return@use
                 }
 
-                querySingleVolume(it, idIdx, bucketIdIdx, bucketNameIdx, dataIdx, relativePathIdx, albums)
+                // 必须把当前查询所用的 collection 传下去：缩略图 URI 要用
+                // “这条记录所属的卷”来拼，否则外置 SD 卡上的图片 ID 会被拼到
+                // 主存储（external_primary）上，解析成完全不相干的另一张图片
+                querySingleVolume(it, collection, idIdx, bucketIdIdx, bucketNameIdx, dataIdx, relativePathIdx, albums)
             }
         }
 
@@ -572,6 +636,7 @@ class MainActivity : FlutterActivity() {
 
     private fun querySingleVolume(
         cursor: android.database.Cursor,
+        collection: Uri,
         idIdx: Int,
         bucketIdIdx: Int,
         bucketNameIdx: Int,
@@ -583,7 +648,6 @@ class MainActivity : FlutterActivity() {
         val rootDir = Environment.getExternalStorageDirectory().absolutePath
 
         while (cursor.moveToNext()) {
-            val bucketId = cursor.getLong(bucketIdIdx)
             val bucketName = cursor.getString(bucketNameIdx) ?: "Unknown"
 
             // 尝试多种方式获取相册路径
@@ -613,10 +677,10 @@ class MainActivity : FlutterActivity() {
 
             // 按实际目录路径分组（而非 bucket_id），
             // 这样大小写不同的目录（DCIM/Camera vs dcim/Camera）不会合并
-            val album = albumMap.getOrPut(albumPath!!) {
+            val album = albumMap.getOrPut(albumPath) {
                 AlbumData(
                     name = bucketName,
-                    representativePath = albumPath!!,
+                    representativePath = albumPath,
                     count = 0,
                     firstImageId = 0
                 )
@@ -631,10 +695,8 @@ class MainActivity : FlutterActivity() {
 
         for ((_, albumData) in albumMap) {
             val thumbnailUri = if (albumData.firstImageId > 0) {
-                ContentUris.withAppendedId(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    albumData.firstImageId
-                ).toString()
+                // 用实际来源卷拼接 URI，保证缩略图指向同一卷上的那张图片
+                ContentUris.withAppendedId(collection, albumData.firstImageId).toString()
             } else null
 
             albums.add(

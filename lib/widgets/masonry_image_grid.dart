@@ -7,13 +7,57 @@ import 'package:slide_show/models/image_item.dart';
 
 /// 瀑布流网格组件：固定列宽，高度按图片宽高比自适应
 class MasonryImageGrid extends StatelessWidget {
-  /// 单个卡片的参考显示宽度（逻辑像素），用于换算解码宽度。
+  /// 宽屏下单个卡片的参考显示宽度（逻辑像素）。
   static const double tileReferenceWidth = 400;
 
+  /// 网格四周内边距（与 [build] 中的 SliverPadding 保持一致）。
+  ///
+  /// 必须与 [crossAxisSpacing] 相等：两者分别是「屏幕边缘到图片」和
+  /// 「图片之间」的间距，取值相同才能让两侧与中间看起来一致。
+  static const double gridPadding = 8;
+
+  /// 卡片之间的横向间距（与 [_MasonryGridDelegate] 的参数保持一致）
+  static const double crossAxisSpacing = 8;
+
+  /// 卡片之间的纵向间距（与 [_MasonryGridDelegate] 的参数保持一致）
+  static const double mainAxisSpacing = 8;
+
+  /// 解码宽度的上浮系数与上下限。
+  ///
+  /// 略高于真实显示宽度，避免因取整导致轻微发虚；同时设上限，
+  /// 防止在超宽屏幕上解码出一张远超所需的巨图。
+  static const double _decodeOversample = 1.2;
+  static const int _minDecodeWidth = 64;
+  static const int _maxDecodeWidth = 2048;
+
+  /// 由可用宽度算出列数（窄屏 2 列，宽屏每 400px 一列）
+  static int crossAxisCountFor(double availableWidth) => availableWidth < 800
+      ? 2
+      : (availableWidth / tileReferenceWidth).floor().clamp(2, 10);
+
+  /// 由可用宽度算出单个卡片的逻辑宽度
+  static double tileWidthFor(double availableWidth) {
+    final count = crossAxisCountFor(availableWidth);
+    return (availableWidth - gridPadding * 2 - crossAxisSpacing * (count - 1)) /
+        count;
+  }
+
   /// 卡片图片的解码宽度（物理像素）。
-  /// 预解码与卡片渲染必须使用同一个值，否则 ImageCache 的键不一致，预解码就白做了。
-  static int decodeWidthFor(BuildContext context) =>
-      (tileReferenceWidth * MediaQuery.of(context).devicePixelRatio).round();
+  ///
+  /// 按**真实卡片宽度**而非固定的 400 逻辑像素换算：
+  /// 手机上 2 列时卡片仅约 180dp，若一律按 400dp × devicePixelRatio
+  /// 解码（3.5 倍屏约 1400px），像素量是实际所需的近 60 倍，
+  /// 直接拖慢解码与内存占用。
+  ///
+  /// 预解码与卡片渲染必须使用同一个值，否则 ImageCache 的键不一致，
+  /// 预解码就白做了。
+  static int decodeWidthFor(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final tileWidth = tileWidthFor(media.size.width);
+    final decodeWidth = (tileWidth * media.devicePixelRatio * _decodeOversample)
+        .round();
+    return decodeWidth.clamp(_minDecodeWidth, _maxDecodeWidth);
+  }
 
   /// 构造卡片使用的 [ImageProvider]，等价于
   /// `Image.file(File(path), cacheWidth: decodeWidthFor(context)).image`。
@@ -26,7 +70,7 @@ class MasonryImageGrid extends StatelessWidget {
   static Future<void> precacheAll(
     List<String> paths,
     BuildContext context, {
-    int concurrency = 4,
+    int concurrency = 6,
   }) async {
     for (var i = 0; i < paths.length; i += concurrency) {
       if (!context.mounted) return;
@@ -100,18 +144,16 @@ class MasonryImageGrid extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           // 窄屏（<800px）固定2列，否则每400px一列
-          final crossAxisCount = constraints.maxWidth < 800
-              ? 2
-              : (constraints.maxWidth / 400).floor().clamp(2, 10);
+          final crossAxisCount = crossAxisCountFor(constraints.maxWidth);
           return CustomScrollView(
             slivers: [
               SliverPadding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(gridPadding),
                 sliver: SliverGrid(
                   gridDelegate: _MasonryGridDelegate(
                     crossAxisCount: crossAxisCount,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
+                    crossAxisSpacing: crossAxisSpacing,
+                    mainAxisSpacing: mainAxisSpacing,
                     aspectRatios: items.map((e) => e.aspectRatio).toList(),
                   ),
                   delegate: SliverChildBuilderDelegate((context, index) {
@@ -203,6 +245,10 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
         onEnter: (_) => setState(() => _isHovered = true),
         onExit: (_) => setState(() => _isHovered = false),
         child: Card(
+          // 必须归零：Card 默认 margin 为 4，会叠加在网格间距之上，
+          // 使实际间距变成「两侧 20 / 中间 16」——既偏宽又不一致。
+          // 间距完全交给 SliverPadding 与 GridDelegate 控制。
+          margin: EdgeInsets.zero,
           elevation: widget.isSelected ? 8 : 4,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:slide_show/models/image_item.dart';
 
 class AlbumInfo {
   final String path;
@@ -90,9 +91,12 @@ class MediaStoreService {
   }
 
   /// 通过 MediaStore 查询指定文件夹下的所有图片路径（Android 专用）
-  static Future<List<({String name, String path})>> getFolderImages(
-    String folderPath,
-  ) async {
+  ///
+  /// 返回的 [ImageItem] 会带上 MediaStore 已索引好的宽高比，
+  /// 瀑布流因此无需再读原图解析尺寸（手机上这一步非常慢）。
+  /// 若 MediaStore 未索引到尺寸，[ImageItem.aspectRatio] 为 null，
+  /// 由调用方回退到读取文件头解析。
+  static Future<List<ImageItem>> getFolderImages(String folderPath) async {
     if (!Platform.isAndroid) return [];
     try {
       final result = await _channel.invokeMethod('getFolderImages', {
@@ -102,7 +106,12 @@ class MediaStoreService {
       final List<dynamic> list = result as List<dynamic>;
       return list.map((item) {
         final map = Map<String, dynamic>.from(item as Map);
-        return (name: map['name'] as String, path: map['path'] as String);
+        final ratio = map['aspectRatio'];
+        return ImageItem(
+          name: map['name'] as String,
+          path: map['path'] as String,
+          aspectRatio: ratio is num ? ratio.toDouble() : null,
+        );
       }).toList();
     } catch (e) {
       debugPrint('[MediaStoreService] getFolderImages failed: $e');

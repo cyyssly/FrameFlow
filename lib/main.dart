@@ -11,6 +11,13 @@ import 'dart:io';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 瀑布流会同时预解码「当前批 + 下一批」（各 30 张）。
+  // 按卡片真实尺寸解码后单张约 2~3MB，60 张已接近默认的 100MiB 上限，
+  // 一旦被驱逐，滚回去时又要重新解码，表现为来回滚动卡顿。
+  // 这里放宽到 256MiB（图片像素本身仍按真实卡片尺寸解码，不会失控）。
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 256 << 20;
+
   final settingsProvider = SettingsProvider();
   await settingsProvider.loadSettings();
 

@@ -29,6 +29,29 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
   /// 是否正在添加文件夹（含原生对话框弹出期间），用于防止重复触发
   bool _isAddingFolder = false;
 
+  /// “已排除的文件”虚拟条目的 Key（列表整体位移时需要它才能重新定位）
+  static const Key _excludedEntryKey = ValueKey('excluded-entry');
+
+  /// 列表项的 Key -> 当前索引。
+  ///
+  /// 供 ListView 在“添加/删除文件夹”后把已有的 Element（及其缩略图 State）
+  /// 重新绑定到正确的位置，避免按位置复用导致缩略图错乱。
+  int? _resolveItemIndex(Key key, List<String> folderPaths, bool hasExcluded) {
+    if (key == _excludedEntryKey) {
+      return hasExcluded ? 0 : null;
+    }
+    if (key is ValueKey<String>) {
+      final value = key.value;
+      if (value.startsWith('folder-')) {
+        final path = value.substring('folder-'.length);
+        final index = folderPaths.indexOf(path);
+        if (index < 0) return null;
+        return hasExcluded ? index + 1 : index;
+      }
+    }
+    return null;
+  }
+
   Future<void> _addFolder() async {
     // 防止重复触发（例如快速双击“添加文件夹”按钮）并发打开原生对话框。
     // Windows 原生目录对话框不允许并发打开，否则会触发 Shell 访问冲突，
@@ -395,6 +418,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
           height: 40,
           child: firstExcludedPath != null
               ? _ThumbnailImage(
+                  key: ValueKey('thumb-excluded-$firstExcludedPath'),
                   thumbnailPath: firstExcludedPath,
                   albumPath: firstExcludedPath,
                 )
@@ -587,16 +611,14 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
 
     // Android 端通过 MediaStore 查询（绕过 Scoped Storage 限制）
     if (Platform.isAndroid) {
+      // 直接透传 ImageItem，保留 MediaStore 已索引好的宽高比
       final images = await MediaStoreService.getFolderImages(folderPath);
-      return images
-          .where((item) {
-            final dotIndex = item.path.lastIndexOf('.');
-            if (dotIndex == -1) return false;
-            final ext = item.path.toLowerCase().substring(dotIndex + 1);
-            return supportedExtensions.contains(ext);
-          })
-          .map((item) => ImageItem(name: item.name, path: item.path))
-          .toList();
+      return images.where((item) {
+        final dotIndex = item.path.lastIndexOf('.');
+        if (dotIndex == -1) return false;
+        final ext = item.path.toLowerCase().substring(dotIndex + 1);
+        return supportedExtensions.contains(ext);
+      }).toList();
     }
 
     // 桌面端使用文件系统 API
@@ -688,12 +710,25 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                   itemCount:
                       slideProvider.folderPaths.length +
                       (settingsProvider.excludedPaths.isNotEmpty ? 1 : 0),
+                  // 列表会因“添加/删除文件夹”或“排除列表由空变非空”而整体位移。
+                  // 若不提供该回调，SliverChildBuilderDelegate.findIndexByKey 会返回
+                  // null，Flutter 只能按“位置”复用 Element，于是某个文件夹的条目
+                  // （连同其缩略图组件）会被复用到另一个文件夹的路径上，
+                  // 出现缩略图张冠李戴的问题。
+                  findChildIndexCallback: (Key key) => _resolveItemIndex(
+                    key,
+                    slideProvider.folderPaths,
+                    settingsProvider.excludedPaths.isNotEmpty,
+                  ),
                   itemBuilder: (context, index) {
                     final hasExcluded =
                         settingsProvider.excludedPaths.isNotEmpty;
                     // 第一个条目（如果有排除文件）是虚拟的"已排除的文件"文件夹
                     if (hasExcluded && index == 0) {
+                      // 外层必须带 Key，findChildIndexCallback 才能把这个条目
+                      // 重新映射回位置 0
                       return Column(
+                        key: _excludedEntryKey,
                         children: [
                           _buildExcludedFolderTile(),
                           const Divider(height: 1, color: Colors.grey),
@@ -714,6 +749,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                           width: 40,
                           height: 40,
                           child: _ThumbnailImage(
+                            // 把 State 与所属文件夹绑定：即使 Element 被复用到其他
+                            // 位置，Key 不一致也会让 Flutter 重建全新的 State，
+                            // 不会残留上一个文件夹已加载的缩略图
+                            key: ValueKey('thumb-$path'),
                             thumbnailPath: null,
                             albumPath: path,
                           ),
@@ -857,6 +896,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         width: 48,
         height: 48,
         child: _ThumbnailImage(
+          key: ValueKey('album-thumb-$albumPath-$thumbnailPath'),
           thumbnailPath: thumbnailPath,
           albumPath: albumPath,
         ),
@@ -870,7 +910,11 @@ class _ThumbnailImage extends StatefulWidget {
   final String? thumbnailPath;
   final String albumPath;
 
-  const _ThumbnailImage({required this.thumbnailPath, required this.albumPath});
+  const _ThumbnailImage({
+    super.key,
+    required this.thumbnailPath,
+    required this.albumPath,
+  });
 
   @override
   State<_ThumbnailImage> createState() => _ThumbnailImageState();
@@ -879,6 +923,10 @@ class _ThumbnailImage extends StatefulWidget {
 class _ThumbnailImageState extends State<_ThumbnailImage> {
   Uint8List? _imageBytes;
   bool _loading = true;
+
+  /// 每次发起加载时递增，用于识别“过期结果”。
+  /// 只要这个值变了，就说明当前请求已不再是该 State 的最新请求。
+  int _requestId = 0;
 
   static const _supportedExtensions = {
     'jpg',
@@ -910,60 +958,81 @@ class _ThumbnailImageState extends State<_ThumbnailImage> {
   }
 
   Future<void> _loadThumbnail() async {
-    setState(() {
-      _loading = true;
-    });
-
-    // 记录本次加载对应的"请求标识"，防止异步加载完成时覆盖了更新的结果
+    final requestId = ++_requestId;
     final requestAlbumPath = widget.albumPath;
     final requestThumbnailPath = widget.thumbnailPath;
 
+    setState(() {
+      _loading = true;
+      // 必须清空旧图：否则下面的“优先读取缩略图，失败再回退到目录首图”
+      // 会因为 _imageBytes 非空而被跳过，直接把上一个文件夹的图片继续显示出来
+      _imageBytes = null;
+    });
+
+    // 结果先写局部变量，只有确认请求仍然有效才提交到 State，
+    // 避免为文件夹 A 发起的读取把文件夹 B 的缩略图覆盖掉
+    Uint8List? bytes;
+
     try {
       // 优先使用原生端返回的 content:// URI 或文件路径
-      if (widget.thumbnailPath != null && widget.thumbnailPath!.isNotEmpty) {
-        if (widget.thumbnailPath!.startsWith('content://')) {
+      if (requestThumbnailPath != null && requestThumbnailPath.isNotEmpty) {
+        if (requestThumbnailPath.startsWith('content://')) {
           // 通过 MethodChannel 读取 content:// URI
-          _imageBytes = await MediaStoreService.readImageBytes(
-            widget.thumbnailPath!,
-          );
+          bytes = await MediaStoreService.readImageBytes(requestThumbnailPath);
         } else {
           // 直接读取文件路径
-          final file = File(widget.thumbnailPath!);
+          final file = File(requestThumbnailPath);
           if (await file.exists()) {
-            _imageBytes = await file.readAsBytes();
+            bytes = await file.readAsBytes();
           }
         }
       }
 
       // 如果缩略图加载失败，尝试从相册文件夹中找第一张图片
-      if (_imageBytes == null) {
-        final dir = Directory(widget.albumPath);
-        if (await dir.exists()) {
-          await for (final entity in dir.list(recursive: false)) {
-            if (entity is File) {
-              final ext = entity.path.split('.').last.toLowerCase();
-              if (_supportedExtensions.contains(ext)) {
-                try {
-                  _imageBytes = await entity.readAsBytes();
-                  break;
-                } catch (_) {}
-              }
-            }
+      bytes ??= await _readFirstImageBytes(requestAlbumPath);
+    } catch (_) {}
+
+    // 如果在加载期间已发起了新的请求（widget 被复用指向其他文件夹），
+    // 丢弃本次结果，同时把 _loading 交还给新请求，不能提前置为 false
+    if (!mounted || requestId != _requestId) return;
+
+    setState(() {
+      _imageBytes = bytes;
+      _loading = false;
+    });
+  }
+
+  /// 取文件夹中的第一张图片字节，作为缩略图回退方案。
+  ///
+  /// Android 上不能直接用 dart:io 枚举 scoped storage 路径——
+  /// 那些路径对应用不可见，既读不到内容还要白白付出一次目录遍历，
+  /// 因此改走 MediaStore 拿到真实路径后再通过原生读取字节。
+  static Future<Uint8List?> _readFirstImageBytes(String folderPath) async {
+    if (Platform.isAndroid) {
+      final images = await MediaStoreService.getFolderImages(folderPath);
+      for (final item in images) {
+        final ext = item.path.split('.').last.toLowerCase();
+        if (!_supportedExtensions.contains(ext)) continue;
+        final data = await MediaStoreService.readImageBytes(item.path);
+        if (data != null) return data;
+      }
+      return null;
+    }
+
+    final dir = Directory(folderPath);
+    if (await dir.exists()) {
+      await for (final entity in dir.list(recursive: false)) {
+        if (entity is File) {
+          final ext = entity.path.split('.').last.toLowerCase();
+          if (_supportedExtensions.contains(ext)) {
+            try {
+              return await entity.readAsBytes();
+            } catch (_) {}
           }
         }
       }
-    } catch (_) {}
-
-    // 如果在加载期间 widget 已被复用指向其他文件夹，丢弃本次结果
-    if (!mounted ||
-        requestAlbumPath != widget.albumPath ||
-        requestThumbnailPath != widget.thumbnailPath) {
-      return;
     }
-
-    setState(() {
-      _loading = false;
-    });
+    return null;
   }
 
   @override
@@ -985,10 +1054,16 @@ class _ThumbnailImageState extends State<_ThumbnailImage> {
     }
 
     if (_imageBytes != null) {
+      // 缩略图容器最大 48dp，按真实尺寸解码即可。
+      // 不加 cacheWidth 时会把整张原图（动辄上千万像素）解码出来塞进 48dp 的框里，
+      // 是列表滚动卡顿的主要原因。
+      final cacheWidth = (48 * MediaQuery.of(context).devicePixelRatio * 2)
+          .round();
       return Image.memory(
         _imageBytes!,
         width: double.infinity,
         height: double.infinity,
+        cacheWidth: cacheWidth,
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
       );

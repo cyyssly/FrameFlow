@@ -51,34 +51,52 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
   }
 
   /// 分批读取宽高比并预解码像素。
-  /// 逐张调用 [ImageScanService.readAspectRatio] 会为每张图创建一个 isolate，
-  /// 这里改为按批并行读取；同时真正把像素解码进 ImageCache，
+  /// 逐张调用会为每张图创建一个 isolate，这里改为按批读取；
+  /// 同时真正把像素解码进 ImageCache，
   /// 否则滚动到新卡片时仍需现场解码，表现为卡顿。
   Future<void> _loadMetadataAndPrecache(List<ImageItem> items) async {
+    // 建立 路径→索引 映射，避免每批都做一次 indexWhere 全表扫描
+    final indexByPath = <String, int>{};
+    for (var i = 0; i < _excludedItems.length; i++) {
+      indexByPath[_excludedItems[i].path] = i;
+    }
+
     for (var start = 0; start < items.length; start += _batchSize) {
       if (!mounted) return;
       final end = (start + _batchSize).clamp(0, items.length);
       final batch = items.sublist(start, end);
-      final ratios = await ImageScanService.readAspectRatios(
-        batch.map((e) => e.path).toList(),
-      );
-      if (!mounted) return;
-      setState(() {
-        for (var i = 0; i < batch.length; i++) {
-          final ratio = ratios[i];
-          if (ratio == null) continue;
-          final item = batch[i];
-          final index = _excludedItems.indexWhere((e) => e.path == item.path);
-          if (index < 0) continue;
-          final updated = ImageItem(
-            name: item.name,
-            path: item.path,
-            aspectRatio: ratio,
-          );
-          _excludedItems[index] = updated;
-          batch[i] = updated;
+
+      // 已带宽高比的项无需再解析
+      final pendingIndexes = <int>[];
+      final pendingPaths = <String>[];
+      for (var i = 0; i < batch.length; i++) {
+        if (batch[i].aspectRatio == null) {
+          pendingIndexes.add(i);
+          pendingPaths.add(batch[i].path);
         }
-      });
+      }
+
+      if (pendingPaths.isNotEmpty) {
+        final ratios = await ImageScanService.readAspectRatios(pendingPaths);
+        if (!mounted) return;
+        setState(() {
+          for (var k = 0; k < pendingPaths.length; k++) {
+            final ratio = ratios[k];
+            if (ratio == null) continue;
+            final i = pendingIndexes[k];
+            final item = batch[i];
+            final index = indexByPath[item.path];
+            if (index == null) continue;
+            final updated = ImageItem(
+              name: item.name,
+              path: item.path,
+              aspectRatio: ratio,
+            );
+            _excludedItems[index] = updated;
+            batch[i] = updated;
+          }
+        });
+      }
       // 宽高比已就绪，再预解码像素
       await _precacheBatch(batch);
     }
