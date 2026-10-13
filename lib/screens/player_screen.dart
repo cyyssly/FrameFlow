@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 // dart:ffi 也导出了 Size（原生 size_t 结构体），会与 dart:ui 的 Size 冲突，
 // 本文件只用到 PowerSqlite/指针相关类型，故隐藏掉它的 Size。
 import 'dart:ffi' hide Size;
@@ -53,6 +53,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// 当前按在屏幕上的手指数，用于判断“是否真的完全松手”。
   int _pointerCount = 0;
+
+  /// 本轮交互中第一根手指按下的位置（全局逻辑坐标）。
+  ///
+  /// 用于在松手时判断这次“轻点”是否落在工具栏的按钮上。
+  /// 工具栏内的按钮有自己的 onPressed，若把“点按钮”也当成“轻点画面”，
+  /// 就会在按钮回调改完状态后立刻把工具栏隐藏掉（例如点播放/暂停后
+  /// 工具栏一闪就消失、自动播放计时器被取消），表现为“按钮点了没反应”。
+  Offset? _pointerDownPosition;
+
+  /// 顶部工具栏（AppBar）、底部按钮行、右下角缩放按钮的位置引用，
+  /// 用于判断按下的落点是否在工具栏内（见 [_isPointOnToolbar]）。
+  final GlobalKey _topControlsKey = GlobalKey();
+  final GlobalKey _bottomControlsKey = GlobalKey();
+  final GlobalKey _zoomControlsKey = GlobalKey();
 
   /// 本轮交互中指尖漂移的最大距离（逻辑像素）。
   ///
@@ -693,8 +707,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _onAllPointersReleased();
   }
 
+  /// 判断某个全局坐标点是否落在工具栏（顶部 AppBar / 底部按钮行 /
+  /// 右下角缩放按钮）内。
+  ///
+  /// 用几何判定代替“在按钮之外再套一层 Listener 置标志位”：后者依赖
+  /// 控件树中“按下/抬起”事件的先后顺序，一旦顺序变化就会失效；
+  /// 而 [GlobalKey] + 命中矩形只取决于布局结果，与事件顺序无关。
+  bool _isPointOnToolbar(Offset globalPosition) {
+    for (final key in [_topControlsKey, _bottomControlsKey, _zoomControlsKey]) {
+      final box = key.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) continue;
+      if ((box.localToGlobal(Offset.zero) & box.size).contains(
+        globalPosition,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void _onAllPointersReleased() {
     _isGestureActive = false;
+    // 取出本轮按下的落点后立即清空，避免影响下一次交互
+    final downPosition = _pointerDownPosition;
+    _pointerDownPosition = null;
     // 仅“单指轻点”才切换工具栏：
     // 双指捏合、有位移的拖动、靠泊切图都不会走到这里切换工具栏。
     final isSingleTap =
@@ -703,7 +739,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
         !_suppressGestureUntilEnd &&
         !_multiPointerUsed;
     if (isSingleTap) {
-      // 轻点 → 切换工具栏显隐（显示中则立即关闭，已关闭则显示）
+      // 落在工具栏上的轻点属于“点按钮”，交给按钮自己的 onPressed 处理：
+      // 只顺延自动隐藏计时，既不隐藏工具栏，也不取消自动播放计时器。
+      // 注意不能用 _showControlsTemporarily()：那会把 _showInfo 也置为 true，
+      // 让“点按钮”意外带出图片信息栏。
+      if (downPosition != null && _isPointOnToolbar(downPosition)) {
+        _hideControlsDelayed();
+        _hideInfoDelayed();
+        return;
+      }
+      // 轻点画面 → 切换工具栏显隐（显示中则立即关闭，已关闭则显示）
       _toggleControls();
     } else {
       // 缩放/拖动结束 → 重新开始自动隐藏计时
@@ -1740,7 +1785,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               onPointerSignal: _handleScroll,
               // 用于“完全松手”才恢复工具栏：GestureDetector 的 onScaleEnd
               // 无法覆盖“双指后先抬一根手指、另一根继续停住”的情形。
-              onPointerDown: (_) {
+              onPointerDown: (event) {
                 if (_pointerCount == 0) {
                   // 新一轮交互开始，重置手势判定标志
                   // （点按按钮等情形不会走到 onScaleStart）
@@ -1749,6 +1794,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   _suppressGestureUntilEnd = false;
                   _gestureTravel = 0.0;
                   _multiPointerUsed = false;
+                  // 记下落点，松手时据此区分“点画面”与“点工具栏按钮”
+                  _pointerDownPosition = event.position;
                 }
                 _pointerCount++;
                 if (_pointerCount > 1) _multiPointerUsed = true;
@@ -1825,6 +1872,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             left: 0,
                             right: 0,
                             child: AppBar(
+                              key: _topControlsKey,
                               backgroundColor: Colors.black.withValues(
                                 alpha: 0.5,
                               ),
@@ -1968,6 +2016,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       ),
                                     ),
                                   Row(
+                                    key: _bottomControlsKey,
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
                                       IconButton(
@@ -2041,6 +2090,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           top: 60,
                           right: 16,
                           child: Column(
+                            key: _zoomControlsKey,
                             children: [
                               if (_scale > _minScale)
                                 FloatingActionButton(
