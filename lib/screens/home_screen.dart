@@ -231,10 +231,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (slideProvider.folderPaths.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先设置要播放幻灯的图片目录'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context).msgSelectFolderFirst),
           backgroundColor: Colors.red,
-          duration: Duration(seconds: 3),
+          duration: const Duration(seconds: 3),
         ),
       );
       return;
@@ -266,10 +266,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (sortedImages.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('选定的目录下没有图片，请重新选择'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context).msgReselectFolder),
             backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 3),
           ),
         );
         return;
@@ -291,10 +291,10 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint('扫描图片失败: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('扫描图片失败，请重试'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context).msgScanError),
           backgroundColor: Colors.red,
-          duration: Duration(seconds: 3),
+          duration: const Duration(seconds: 3),
         ),
       );
     } finally {
@@ -500,7 +500,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                'V1.3.1',
+                'V1.3.2',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withValues(alpha: 0.3),

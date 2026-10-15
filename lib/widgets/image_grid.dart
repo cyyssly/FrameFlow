@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:slide_show/models/image_item.dart';
+import 'package:slide_show/l10n/app_localizations.dart';
 
 class ImageGrid extends StatelessWidget {
   final List<ImageItem> images;
@@ -17,15 +18,15 @@ class ImageGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (images.isEmpty) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.image, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
+            const Icon(Icons.image, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
             Text(
-              '请选择一个包含图片的目录',
-              style: TextStyle(color: Colors.grey, fontSize: 16),
+              AppLocalizations.of(context).selectDirWithImages,
+              style: const TextStyle(color: Colors.grey, fontSize: 16),
             ),
           ],
         ),
@@ -40,7 +41,7 @@ class ImageGrid extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '共 ${images.length} 张图片',
+                AppLocalizations.of(context).imagesTotal(images.length),
                 style: const TextStyle(color: Colors.grey),
               ),
               ElevatedButton(
@@ -48,11 +49,11 @@ class ImageGrid extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFe94560),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.play_arrow),
-                    SizedBox(width: 8),
-                    Text('开始播放'),
+                    const Icon(Icons.play_arrow),
+                    const SizedBox(width: 8),
+                    Text(AppLocalizations.of(context).startPlay),
                   ],
                 ),
               ),

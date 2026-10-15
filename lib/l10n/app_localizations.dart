@@ -6,7 +6,7 @@ enum AppLanguage {
   system(0, '跟随系统', Locale('en', 'US')),
   zhCN(1, '简体中文', Locale('zh', 'CN')),
   en(2, 'English', Locale('en', 'US')),
-  zhTW(3, '繁體中文', Locale('zh', 'HK'));
+  zhTW(3, '繁體中文', Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'));
 
   final int value;
   final String label;
@@ -41,7 +41,9 @@ class AppLocalizations {
       case 2:
         return AppLocalizations(const Locale('en', 'US'));
       case 3:
-        return AppLocalizations(const Locale('zh', 'HK'));
+        return AppLocalizations(
+          const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
+        );
       default:
         return AppLocalizations(_systemLocale());
     }
@@ -56,7 +58,7 @@ class AppLocalizations {
     final loc = Platform.localeName;
     if (loc.startsWith('zh')) {
       if (loc.contains('TW') || loc.contains('HK') || loc.contains('MO')) {
-        return const Locale('zh', 'HK');
+        return const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant');
       }
       return const Locale('zh', 'CN');
     }
@@ -92,13 +94,12 @@ class AppLocalizations {
   String get noImages => _t('没有图片', 'No Images', '沒有圖片');
   String get imageLoadFailed => _t('图片加载失败', 'Load Failed', '圖片加載失敗');
   String get unknownDate => _t('未知日期', 'Unknown Date', '未知日期');
-  String get rescanning => _t('正在重新扫描...', 'Rescanning...', '正在重新掃描...');
 
   // 设置页
   String get settingsTitle => _t('设置', 'Settings', '設置');
   String get languageLabel => _t('语言', 'Language', '語言');
   String get systemLang => _t('跟随系统', 'System', '跟隨系統');
-  String get playOrderMode => _t('播放顺序模式', 'Play Order', '播放順序模式');
+  String get playOrderMode => _t('播放顺序', 'Play Order', '播放順序');
   String get playSettings => _t('播放设置', 'Playback', '播放設置');
   String get sequential => _t('顺序播放', 'Sequential', '順序播放');
   String get randomPlay => _t('随机播放', 'Random', '隨機播放');
@@ -109,7 +110,11 @@ class AppLocalizations {
   String get loopPlayDesc =>
       _t('关闭：播完停止；开启：首尾循环', 'Off: stop at end; On: loop', '關閉：播完停止；開啟：首尾循環');
   String get autoPlay => _t('自动播放', 'Auto Play', '自動播放');
-  String get interval => _t('轮播间隔', 'Interval', '輪播間隔');
+  String get autoPlayDesc =>
+      _t('进入应用后立即开始播放幻灯片', 'Start slideshow on launch', '進入應用後立即開始播放幻燈片');
+  String get minute => _t('分钟', 'min', '分鐘');
+  String get toggleFullscreen => _t('全屏切换', 'Toggle Fullscreen', '全屏切換');
+  String get interval => _t('换片时间', 'Interval', '換片時間');
   String get imageDisplay => _t('图片显示', 'Display', '圖片顯示');
   String get fitMode => _t('填充模式', 'Fit Mode', '填充模式');
   String get contain => _t('适应窗口', 'Contain', '適應窗口');
@@ -132,10 +137,8 @@ class AppLocalizations {
   String get slideUp => _t('上下滑动', 'Slide Up', '上下滑動');
   String get slideDown => _t('下上滑动', 'Slide Down', '下上滑動');
   String get animDuration => _t('动画时长', 'Duration', '動畫時長');
-  String get windowFullscreen => _t('窗口/全屏', 'Window', '窗口/全屏');
-  String get startFullscreen => _t('启动自动全屏', 'Fullscreen', '啟動自動全屏');
-  String get startFullscreenDesc =>
-      _t('打开幻灯直接进入全屏', 'Enter fullscreen on start', '打開幻燈直接進入全屏');
+  String get windowFullscreen => _t('工具栏', 'Toolbar', '工具欄');
+  String get startFullscreen => _t('播放时自动全屏', 'Auto Fullscreen', '播放時自動全屏');
   String get hideToolbarLabel => _t('自动隐藏工具栏', 'Hide Toolbar', '自動隱藏工具欄');
   String get hideToolbarDesc => _t(
     '一段时间无操作自动隐藏上下工具栏',
@@ -150,11 +153,11 @@ class AppLocalizations {
     '暫停播放時不自動隱藏播放工具欄',
   );
   String get filesAndDirs => _t('文件与目录', 'Files & Folders', '文件與目錄');
-  String get recursiveScan => _t('递归扫描子文件夹', 'Recursive', '遞歸掃描子文件夾');
+  String get recursiveScan => _t('包含子文件夹', 'Include Subfolders', '包含子文件夾');
   String get recursiveScanDesc => _t(
-    '开启后同时读取子文件夹中的图片文件',
-    'Scan images in subfolders too',
-    '開啟後同時讀取子文件夾中的圖片文件',
+    '开启后连子文件夹里的图片一起播放',
+    'Play images from subfolders too',
+    '開啟後連子文件夾裡的圖片一起播放',
   );
   String get infoDisplay => _t('信息显示', 'Info', '信息顯示');
   String get showImageInfo => _t('图片信息显示', 'Show Info', '圖片信息顯示');
@@ -171,7 +174,15 @@ class AppLocalizations {
   String get wheelSwitch => _t('滚轮行为', 'Scroll Wheel', '滾輪行為');
   String get wheelSwitchImage => _t('切换图片', 'Switch Image', '切換圖片');
   String get wheelZoom => _t('缩放图片', 'Zoom', '縮放圖片');
+  String get ctrlWheelZoomHint =>
+      _t('Ctrl+滚轮：缩放图片', 'Ctrl + Wheel: Zoom', 'Ctrl+滾輪：縮放圖片');
+  String get ctrlWheelSwitchHint =>
+      _t('Ctrl+滚轮：切换图片', 'Ctrl + Wheel: Switch Image', 'Ctrl+滾輪：切換圖片');
   String get deleteBehavior => _t('删除行为', 'Delete', '刪除行為');
+  String get ctrlDelDeleteHint =>
+      _t('Ctrl+Del：实际删除', 'Ctrl + Del: Delete File', 'Ctrl+Del：實際刪除');
+  String get ctrlDelExcludeHint =>
+      _t('Ctrl+Del：排除播放', 'Ctrl + Del: Exclude', 'Ctrl+Del：排除播放');
   String get excludeFromPlay => _t('排除播放', 'Exclude', '排除播放');
   String get deleteFile => _t('实际删除', 'Delete File', '實際刪除');
   String get second => _t('秒', 's', '秒');
@@ -187,20 +198,25 @@ class AppLocalizations {
       _t('文件删除失败，可能被其他程序占用', 'Delete failed: file in use', '文件刪除失敗，可能被其他程序佔用');
   String get excluded => _t('图片已排除播放', 'Image excluded', '圖片已排除播放');
   String get deleted => _t('图片已删除', 'Image deleted', '圖片已刪除');
-  String get noFolderSelected => _t('没有选择文件夹', 'No folder selected', '沒有選擇文件夾');
   String get shortcutTitle => _t('内置快捷键', 'Shortcuts', '內置快捷鍵');
+  String get spaceKey => _t('空格', 'Space', '空格');
   String get playPause => _t('播放/暂停', 'Play / Pause', '播放/暫停');
   String get previous => _t('上一张', 'Previous', '上一張');
   String get next => _t('下一张', 'Next', '下一張');
-  String get rescan => _t('重新扫描', 'Rescan', '重新掃描');
   String get exitFullscreen => _t('退出全屏', 'Exit Fullscreen', '退出全屏');
   String get enterFullscreen => _t('全屏', 'Fullscreen', '全屏');
   String get rotate => _t('旋转', 'Rotate', '旋轉');
-  String get customLabel => _t('自定义', 'Custom', '自定義');
+  String get rotateRight => _t('向右旋转', 'Rotate Right', '向右旋轉');
+  String get rotateLeft => _t('向左旋转', 'Rotate Left', '向左旋轉');
+  String get zoomIn => _t('放大', 'Zoom In', '放大');
+  String get zoomOut => _t('缩小', 'Zoom Out', '縮小');
+  String get fitScreen => _t('适应屏幕', 'Fit Screen', '適應屏幕');
+  String get customIntervalLabel =>
+      _t('自定义换片时间：', 'Custom interval:', '自訂換片時間：');
   String get shortcutHint => _t(
-    'ESC: 退出播放 | F11: 全屏切换 | Del: 删除图片 | 空格: 播放/暂停 | ←→: 切换',
-    'ESC: Fullscreen | F11: Fullscreen Toggle | Del: Delete Image | Space: Play/Pause | ←→: Navigate',
-    'ESC: 退出播放 | F11: 全屏切換 | Del: 刪除圖片 | 空格: 播放/暫停 | ←→: 切換',
+    'ESC: 退出播放 | F11: 全屏切换 | Del: 删除图片 | 空格: 播放/暂停 | ←→: 切换 | ↑↓: 缩放 | R/L: 旋转',
+    'ESC: Fullscreen | F11: Fullscreen Toggle | Del: Delete Image | Space: Play/Pause | ←→: Navigate | ↑↓: Zoom | R/L: Rotate',
+    'ESC: 退出播放 | F11: 全屏切換 | Del: 刪除圖片 | 空格: 播放/暫停 | ←→: 切換 | ↑↓: 縮放 | R/L: 旋轉',
   );
   String get errorRange => _t(
     '须为大于1且小于65535的整数',
@@ -216,6 +232,24 @@ class AppLocalizations {
   String get msgAutoScanError => _t('自动扫描失败', 'Auto-scan failed', '自動掃描失敗');
   String get back => _t('返回', 'Back', '返回');
 
+  // 其余页面补充
+  String get selectDirWithImages =>
+      _t('请选择一个包含图片的目录', 'Select a folder with images', '請選擇一個包含圖片的目錄');
+  String get unknown => _t('未知', 'Unknown', '未知');
+  String get deleteFileLabel => _t('删除文件', 'Delete File', '刪除文件');
+  String get needPermissionToRead =>
+      _t('需要存储权限才能读取图片', 'Storage permission required', '需要存儲權限才能讀取圖片');
+  String imagesTotal(int c) => _t('共 $c 张图片', '$c images', '共 $c 張圖片');
+  String imagesCount(int c) => _t('$c 张图片', '$c images', '$c 張圖片');
+  String includesImages(int c) =>
+      _t('包含 $c 张图片', 'Includes $c images', '包含 $c 張圖片');
+  String filesCount(int c) => _t('包含$c个文件', '$c files', '包含$c個文件');
+  String folderContentCount(int subfolders, int files) => _t(
+    '包含$subfolders个子文件夹，共$files个文件',
+    '$subfolders subfolders, $files files',
+    '包含$subfolders個子文件夾，共$files個文件',
+  );
+
   // 消息
   String msgScanComplete(int c) =>
       _t('扫描完成，共 $c 张图片', 'Done: $c images', '掃描完成，共 $c 張圖片');
@@ -225,7 +259,7 @@ class AppLocalizations {
       _t('需要存储读取权限', 'Permission required', '需要存儲讀取權限');
   String get msgNoAlbumsFound =>
       _t('未找到包含图片的相册', 'No albums found', '未找到包含圖片的相冊');
-  String msgScanFailed(String e) => _t('扫描失败: $e', 'Failed: $e', '掃描失敗: $e');
+  String msgScanFailed(Object e) => _t('扫描失败: $e', 'Failed: $e', '掃描失敗: $e');
 
   // 排除图片浏览
   String get excludedFolder => _t('已排除的图片', 'Excluded Images', '已排除的圖片');

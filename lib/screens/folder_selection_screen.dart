@@ -72,8 +72,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       if (!hasPermission) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('需要存储权限才能读取图片'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context).needPermissionToRead),
               backgroundColor: Colors.red,
             ),
           );
@@ -85,8 +85,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       if (albums.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('未找到包含图片的相册'),
+            SnackBar(
+              content: Text(AppLocalizations.of(context).msgNoAlbumsFound),
               backgroundColor: Colors.orange,
             ),
           );
@@ -107,9 +107,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
           ];
           return AlertDialog(
             backgroundColor: const Color(0xFF16213e),
-            title: const Text(
-              '选择相册',
-              style: TextStyle(color: Colors.white, fontSize: 18),
+            title: Text(
+              AppLocalizations.of(context).selectAlbumTitle,
+              style: const TextStyle(color: Colors.white, fontSize: 18),
             ),
             content: SizedBox(
               width: double.maxFinite,
@@ -143,7 +143,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                         ),
                       ),
                       subtitle: Text(
-                        '${album.imageCount} 张图片',
+                        AppLocalizations.of(
+                          context,
+                        ).imagesCount(album.imageCount),
                         style: const TextStyle(
                           color: Colors.grey,
                           fontSize: 12,
@@ -157,9 +159,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  '取消',
-                  style: TextStyle(color: Colors.white70),
+                child: Text(
+                  AppLocalizations.of(context).cancel,
+                  style: const TextStyle(color: Colors.white70),
                 ),
               ),
               TextButton(
@@ -170,9 +172,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                   }
                   Navigator.pop(context, chosen.isEmpty ? null : chosen);
                 },
-                child: const Text(
-                  '确定',
-                  style: TextStyle(
+                child: Text(
+                  AppLocalizations.of(context).confirm,
+                  style: const TextStyle(
                     color: Color(0xFFe94560),
                     fontWeight: FontWeight.bold,
                   ),
@@ -349,9 +351,11 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
 
     String countText;
     if (settingsProvider.recursiveScan) {
-      countText = '包含$subfolderCount个子文件夹，共$imageCount个文件';
+      countText = AppLocalizations.of(
+        context,
+      ).folderContentCount(subfolderCount, imageCount);
     } else {
-      countText = '包含$imageCount个文件';
+      countText = AppLocalizations.of(context).filesCount(imageCount);
     }
 
     return Text(
@@ -437,7 +441,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
       ),
       subtitle: Text(
-        excludedCount > 0 ? '包含 $excludedCount 张图片' : '暂无已排除的图片',
+        excludedCount > 0
+            ? loc.includesImages(excludedCount)
+            : loc.noExcludedImages,
         style: const TextStyle(fontSize: 12, color: Colors.grey),
       ),
       // 用与 IconButton 相同尺寸的容器包裹，保证与下方删除按钮竖向对齐
@@ -464,10 +470,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
 
     if (slideProvider.folderPaths.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先添加文件夹'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context).msgAddFolderFirst),
           backgroundColor: Colors.red,
-          duration: Duration(seconds: 3),
+          duration: const Duration(seconds: 3),
         ),
       );
       return;
@@ -520,10 +526,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       if (sortedImages.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('选定的目录下没有图片'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context).msgNoImages),
             backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 3),
           ),
         );
         setState(() {
@@ -540,7 +546,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('扫描完成，共 ${sortedImages.length} 张图片'),
+            content: Text(
+              AppLocalizations.of(context).msgScanComplete(sortedImages.length),
+            ),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 3),
           ),
@@ -559,7 +567,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('扫描失败: $e'),
+          content: Text(AppLocalizations.of(context).msgScanFailed(e)),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 3),
         ),
@@ -695,7 +703,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('选择文件夹'),
+        title: Text(AppLocalizations.of(context).selectFolderTitle),
         centerTitle: true,
         backgroundColor: const Color(0xFF16213e),
       ),

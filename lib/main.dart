@@ -58,7 +58,7 @@ class MyApp extends StatelessWidget {
       ],
       supportedLocales: const [
         Locale('zh', 'CN'),
-        Locale('zh', 'HK'),
+        Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
         Locale('en', 'US'),
       ],
       theme: ThemeData(
@@ -80,7 +80,7 @@ class MyApp extends StatelessWidget {
     final loc = Platform.localeName;
     if (loc.startsWith('zh')) {
       if (loc.contains('TW') || loc.contains('HK') || loc.contains('MO')) {
-        return const Locale('zh', 'HK');
+        return const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant');
       }
       return const Locale('zh', 'CN');
     }

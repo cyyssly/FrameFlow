@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/rendering.dart'
     show SliverGridLayout, SliverGridGeometry, SliverConstraints;
 import 'package:slide_show/models/image_item.dart';
+import 'package:slide_show/l10n/app_localizations.dart';
 
 /// 瀑布流网格组件：固定列宽，高度按图片宽高比自适应
 class MasonryImageGrid extends StatelessWidget {
@@ -303,7 +304,7 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
                 _iconButton(
                   Icons.delete_outline,
                   Colors.redAccent,
-                  '删除',
+                  AppLocalizations.of(context).deleteImage,
                   widget.onDelete,
                 ),
               ],
@@ -315,14 +316,14 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
                 _iconButton(
                   Icons.drive_file_move_outline,
                   Colors.lightBlue,
-                  '移动到',
+                  AppLocalizations.of(context).moveTo,
                   widget.onMove,
                 ),
                 const SizedBox(width: 8),
                 _iconButton(
                   Icons.content_copy,
                   Colors.greenAccent,
-                  '复制到',
+                  AppLocalizations.of(context).copyTo,
                   widget.onCopy,
                 ),
               ],

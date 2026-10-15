@@ -31,6 +31,7 @@ enum ImageOrientation {
 
 class SettingsProvider extends ChangeNotifier {
   // 播放基础设置
+  // 换片时间的滑块档位值（毫秒），自定义开关关闭时生效
   int _interval = 5000;
   PlayOrder _playOrder = PlayOrder.sequential;
   bool _loopPlay = false;
@@ -72,12 +73,20 @@ class SettingsProvider extends ChangeNotifier {
   // 语言设置（0=跟随系统, 1=简体中文, 2=English, 3=繁體中文）
   int _languageIndex = 0;
 
-  // 自定义轮播间隔（毫秒），默认1800秒 = 1800000ms
+  // 自定义换片时间（毫秒），默认1800秒 = 1800000ms，开关打开时生效
   int _customInterval = 1800000;
 
+  // 是否启用自定义换片时间：开启时 _customInterval 生效，_interval 仅保留滑块位置
+  bool _useCustomInterval = false;
+
   // Getters
-  int get interval => _interval;
+  /// 换片时间的生效值：自定义开关开启时取自定义秒数，否则取滑块档位值
+  int get interval => _useCustomInterval ? _customInterval : _interval;
+
+  /// 滑块档位值（自定义开启时仅保留位置，不参与生效）
+  int get presetInterval => _interval;
   int get customInterval => _customInterval;
+  bool get useCustomInterval => _useCustomInterval;
   List<String> get excludedPaths => List.unmodifiable(_excludedPaths);
   PlayOrder get playOrder => _playOrder;
   bool get loopPlay => _loopPlay;
@@ -104,8 +113,14 @@ class SettingsProvider extends ChangeNotifier {
   int get languageIndex => _languageIndex;
 
   // Setters
-  void setInterval(int value) {
+  void setPresetInterval(int value) {
     _interval = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setUseCustomInterval(bool value) {
+    _useCustomInterval = value;
     notifyListeners();
     _saveSettings();
   }
@@ -325,6 +340,7 @@ class SettingsProvider extends ChangeNotifier {
         ImageOrientation.values[prefs.getInt('imageOrientation') ?? 2];
     _languageIndex = prefs.getInt('languageIndex') ?? 0;
     _customInterval = prefs.getInt('customInterval') ?? 1800000;
+    _useCustomInterval = prefs.getBool('useCustomInterval') ?? false;
 
     notifyListeners();
   }
@@ -352,6 +368,7 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.setBool('showImageInfo', _showImageInfo);
     await prefs.setInt('languageIndex', _languageIndex);
     await prefs.setInt('customInterval', _customInterval);
+    await prefs.setBool('useCustomInterval', _useCustomInterval);
     await prefs.setBool('infoAutoHide', _infoAutoHide);
     await prefs.setInt('infoHideDelay', _infoHideDelay);
     await prefs.setBool('wheelSwitchImage', _wheelSwitchImage);

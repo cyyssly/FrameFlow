@@ -6,6 +6,9 @@ import 'package:slide_show/l10n/app_localizations.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  /// 宽度达到该值时分左右两栏显示，否则保持单栏。
+  static const double _twoColumnBreakpoint = 900;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -19,10 +22,22 @@ class SettingsScreen extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // 语言设置
+      body: LayoutBuilder(
+        builder: (context, constraints) =>
+            _buildResponsiveBody(context, constraints, _sectionGroups(context)),
+      ),
+    );
+  }
+
+  /// 设置页的所有分组。
+  ///
+  /// [weight] 是各分组高度的粗略估算，仅用于宽屏分栏时把分组均衡地分到各列。
+  List<_SettingsGroup> _sectionGroups(BuildContext context) {
+    return [
+      // 语言设置
+      _SettingsGroup(
+        weight: 2,
+        widgets: [
           _buildSectionTitle(AppLocalizations.of(context).languageLabel),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => _buildDropdownSetting(
@@ -31,15 +46,19 @@ class SettingsScreen extends StatelessWidget {
               [
                 (AppLocalizations.of(context).systemLang, 0),
                 ('简体中文', 1),
-                ('English', 2),
                 ('繁體中文', 3),
+                ('English', 2),
               ],
               settings.languageIndex,
               (value) => settings.setLanguageIndex(value),
             ),
           ),
-          const SizedBox(height: 8),
-          // 播放基础设置
+        ],
+      ),
+      // 播放基础设置
+      _SettingsGroup(
+        weight: 5,
+        widgets: [
           _buildSectionTitle(AppLocalizations.of(context).playSettings),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
@@ -47,11 +66,13 @@ class SettingsScreen extends StatelessWidget {
               children: [
                 _buildIntervalSetting(
                   context,
-                  '轮播间隔时间',
-                  settings.interval,
+                  AppLocalizations.of(context).interval,
+                  settings.presetInterval,
                   settings.customInterval,
-                  (value) => settings.setInterval(value),
+                  settings.useCustomInterval,
+                  (value) => settings.setPresetInterval(value),
                   (value) => settings.setCustomInterval(value),
+                  (value) => settings.setUseCustomInterval(value),
                 ),
                 _buildDropdownSetting(
                   context,
@@ -80,24 +101,34 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 _buildSwitchSetting(
                   context,
-                  '循环播放',
+                  AppLocalizations.of(context).loopPlay,
                   AppLocalizations.of(context).loopPlayDesc,
                   settings.loopPlay,
                   (value) => settings.setLoopPlay(value),
                 ),
                 _buildSwitchSetting(
                   context,
-                  '自动播放',
-                  '进入应用后立即开始播放幻灯片',
+                  AppLocalizations.of(context).autoPlay,
+                  AppLocalizations.of(context).autoPlayDesc,
                   settings.autoPlay,
                   (value) => settings.setAutoPlay(value),
+                ),
+                _buildSwitchSetting(
+                  context,
+                  AppLocalizations.of(context).startFullscreen,
+                  '',
+                  settings.startFullscreen,
+                  (value) => settings.setStartFullscreen(value),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-
-          // 图片显示设置
+        ],
+      ),
+      // 图片显示设置
+      _SettingsGroup(
+        weight: 4,
+        widgets: [
           _buildSectionTitle(AppLocalizations.of(context).imageDisplay),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
@@ -160,9 +191,12 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 24),
-
-          // 切换动画
+        ],
+      ),
+      // 切换动画
+      _SettingsGroup(
+        weight: 3,
+        widgets: [
           _buildSectionTitle(AppLocalizations.of(context).transitionAnimation),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
@@ -193,8 +227,8 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 _buildSliderSetting(
                   context,
-                  '动画时长',
-                  '${settings.animationDuration.toStringAsFixed(1)}秒',
+                  AppLocalizations.of(context).animDuration,
+                  '${settings.animationDuration.toStringAsFixed(1)}${AppLocalizations.of(context).second}',
                   settings.animationDuration,
                   0.1,
                   1.0,
@@ -204,31 +238,27 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 24),
-
-          // 窗口/全屏控制
+        ],
+      ),
+      // 工具栏
+      _SettingsGroup(
+        weight: 5,
+        widgets: [
           _buildSectionTitle(AppLocalizations.of(context).windowFullscreen),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
                 _buildSwitchSetting(
                   context,
-                  '启动自动全屏',
-                  '打开幻灯直接进入全屏',
-                  settings.startFullscreen,
-                  (value) => settings.setStartFullscreen(value),
-                ),
-                _buildSwitchSetting(
-                  context,
-                  '隐藏工具栏',
-                  '一段时间无操作自动隐藏上下工具栏',
+                  AppLocalizations.of(context).hideToolbarLabel,
+                  AppLocalizations.of(context).hideToolbarDesc,
                   settings.hideToolbar,
                   (value) => settings.setHideToolbar(value),
                 ),
                 _buildSliderSetting(
                   context,
-                  '控制栏隐藏延迟',
-                  '${settings.controlsHideDelay}秒',
+                  AppLocalizations.of(context).hideDelay,
+                  '${settings.controlsHideDelay}${AppLocalizations.of(context).second}',
                   settings.controlsHideDelay.toDouble(),
                   1,
                   15,
@@ -237,56 +267,62 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 _buildSwitchSetting(
                   context,
-                  '暂停时保持工具栏',
-                  '暂停播放时不自动隐藏播放工具栏',
+                  AppLocalizations.of(context).keepOnPause,
+                  AppLocalizations.of(context).keepOnPauseDesc,
                   settings.keepControlsOnPause,
                   (value) => settings.setKeepControlsOnPause(value),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-
-          // 文件与目录相关
+        ],
+      ),
+      // 文件与目录相关
+      _SettingsGroup(
+        weight: 2,
+        widgets: [
           _buildSectionTitle(AppLocalizations.of(context).filesAndDirs),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
                 _buildSwitchSetting(
                   context,
-                  '包含子文件夹文件',
-                  '开启后同时读取子文件夹中的图片文件',
+                  AppLocalizations.of(context).recursiveScan,
+                  AppLocalizations.of(context).recursiveScanDesc,
                   settings.recursiveScan,
                   (value) => settings.setRecursiveScan(value),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-
-          // 信息显示设置
+        ],
+      ),
+      // 信息显示设置
+      _SettingsGroup(
+        weight: 4,
+        widgets: [
           _buildSectionTitle(AppLocalizations.of(context).infoDisplay),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
                 _buildSwitchSetting(
                   context,
-                  '显示图片信息',
-                  '文件名/文件大小/分辨率/当前页码',
+                  AppLocalizations.of(context).showImageInfo,
+                  AppLocalizations.of(context).showImageInfoDesc,
                   settings.showImageInfo,
                   (value) => settings.setShowImageInfo(value),
                 ),
                 _buildSwitchSetting(
                   context,
-                  '信息条自动隐藏',
-                  '几秒无操作自动消失',
+                  AppLocalizations.of(context).infoAutoHideLabel,
+                  AppLocalizations.of(context).infoAutoHideDesc,
                   settings.infoAutoHide,
                   (value) => settings.setInfoAutoHide(value),
                 ),
                 _buildSliderSetting(
                   context,
-                  '信息条隐藏延迟',
-                  '${settings.infoHideDelay}秒',
+                  AppLocalizations.of(context).infoHideDelay,
+                  '${settings.infoHideDelay}${AppLocalizations.of(context).second}',
                   settings.infoHideDelay.toDouble(),
                   1,
                   15,
@@ -296,9 +332,12 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 24),
-
-          // 快捷键与控制
+        ],
+      ),
+      // 快捷键与控制
+      _SettingsGroup(
+        weight: 4,
+        widgets: [
           _buildSectionTitle(AppLocalizations.of(context).controlsLabel),
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
@@ -306,9 +345,16 @@ class SettingsScreen extends StatelessWidget {
                 _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).wheelSwitch,
-                  [('切换图片', true), ('缩放图片', false)],
+                  [
+                    (AppLocalizations.of(context).wheelSwitchImage, true),
+                    (AppLocalizations.of(context).wheelZoom, false),
+                  ],
                   settings.wheelSwitchImage,
                   (value) => settings.setWheelSwitchImage(value),
+                  // 说明修饰键滚轮执行的是与当前设置相反的行为
+                  subtitle: settings.wheelSwitchImage
+                      ? AppLocalizations.of(context).ctrlWheelZoomHint
+                      : AppLocalizations.of(context).ctrlWheelSwitchHint,
                 ),
                 _buildDropdownSetting(
                   context,
@@ -325,6 +371,10 @@ class SettingsScreen extends StatelessWidget {
                   ],
                   settings.deleteAction,
                   (value) => settings.setDeleteAction(value),
+                  // 说明修饰键 + Del 执行的是与当前设置相反的行为
+                  subtitle: settings.deleteAction == DeleteAction.exclude
+                      ? AppLocalizations.of(context).ctrlDelDeleteHint
+                      : AppLocalizations.of(context).ctrlDelExcludeHint,
                 ),
                 _buildShortcutInfo(context),
               ],
@@ -332,7 +382,92 @@ class SettingsScreen extends StatelessWidget {
           ),
         ],
       ),
+    ];
+  }
+
+  /// 根据可用宽度决定单栏还是双栏布局。
+  ///
+  /// 两种布局都只有一个 [ListView]：宽度足够时把左右两栏放进同一个滚动列表里，
+  /// 两栏共用一个滚动位置（同时滚动），而不是各自独立滚动。
+  Widget _buildResponsiveBody(
+    BuildContext context,
+    BoxConstraints constraints,
+    List<_SettingsGroup> groups,
+  ) {
+    const padding = EdgeInsets.all(16);
+    final availableWidth = constraints.maxWidth - padding.horizontal;
+    // 宽度不确定（例如无界约束）时按单栏处理，避免误判。
+    final isTwoColumn =
+        constraints.maxWidth.isFinite &&
+        availableWidth >= SettingsScreen._twoColumnBreakpoint;
+
+    if (!isTwoColumn) {
+      return ListView(
+        padding: padding,
+        children: _interleaveGroupsWithSpacing(groups),
+      );
+    }
+
+    // 按估算高度把分组均衡地分到左右两栏（顺序保持不变）。
+    final columns = _distributeGroups(groups, 2);
+    // IntrinsicHeight 为两栏提供有界高度，让分隔线能铺满整列；
+    // 两栏同处一个 ListView 内，滚动时一起移动。
+    return ListView(
+      padding: padding,
+      children: [
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < columns.length; i++) ...[
+                if (i > 0)
+                  const VerticalDivider(width: 32, color: Colors.white12),
+                Expanded(
+                  child: Column(
+                    key: ValueKey('settings-column-$i'),
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: _interleaveGroupsWithSpacing(columns[i]),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
+  }
+
+  /// 把分组铺平成 widget 列表，并在组与组之间插入间距。
+  ///
+  /// 单栏与双栏都复用这套排布，因此共用同一个 [ListView] 的滚动位置，
+  /// 切换窗口宽度时不会出现两套滚动状态。
+  List<Widget> _interleaveGroupsWithSpacing(List<_SettingsGroup> groups) {
+    return [
+      for (var i = 0; i < groups.length; i++) ...[
+        if (i > 0) const SizedBox(height: 24),
+        ...groups[i].widgets,
+      ],
+    ];
+  }
+
+  /// 把分组按估算高度均衡地分配到 [count] 列（保持原有顺序）。
+  ///
+  /// 每次把下一个分组放入当前最矮的一列，尽量让各列高度接近。
+  List<List<_SettingsGroup>> _distributeGroups(
+    List<_SettingsGroup> groups,
+    int count,
+  ) {
+    final columns = List.generate(count, (_) => <_SettingsGroup>[]);
+    final heights = List.filled(count, 0);
+    for (final group in groups) {
+      var target = 0;
+      for (var i = 1; i < count; i++) {
+        if (heights[i] < heights[target]) target = i;
+      }
+      columns[target].add(group);
+      heights[target] += group.weight;
+    }
+    return columns;
   }
 
   Widget _buildSectionTitle(String title) {
@@ -423,11 +558,14 @@ class SettingsScreen extends StatelessWidget {
   Widget _buildIntervalSetting(
     BuildContext context,
     String title,
-    int currentValue,
+    int presetInterval,
     int customInterval,
+    bool useCustomInterval,
     void Function(int) onChanged,
     void Function(int) onCustomChanged,
+    void Function(bool) onUseCustomChanged,
   ) {
+    final l10n = AppLocalizations.of(context);
     // 间隔选项（毫秒）
     const intervals = [
       1000,
@@ -452,18 +590,14 @@ class SettingsScreen extends StatelessWidget {
     ];
     // 对应的显示文字
     String intervalLabel(int ms) {
-      if (ms < 60000) return '${ms ~/ 1000}秒';
-      if (ms < 3600000) return '${ms ~/ 60000}分钟';
-      return '${ms ~/ 60000}分钟';
+      if (ms < 60000) return '${ms ~/ 1000}${l10n.second}';
+      if (ms < 3600000) return '${ms ~/ 60000}${l10n.minute}';
+      return '${ms ~/ 60000}${l10n.minute}';
     }
 
-    // 构建下拉选项：仅预设值，自定义单独一行
-    final intervalOptions = intervals
-        .map((ms) => (intervalLabel(ms), ms))
-        .toList();
-
-    final isCustom = !intervals.contains(currentValue);
-    final selectedLabel = isCustom ? '自定义' : intervalLabel(currentValue);
+    // 档位值未命中预设刻度时，滑块落在最接近的档位上（超出最大档则落在末档）
+    var sliderIndex = intervals.indexWhere((ms) => ms >= presetInterval);
+    if (sliderIndex < 0) sliderIndex = intervals.length - 1;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -478,96 +612,65 @@ class SettingsScreen extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
               ),
-              PopupMenuButton<int>(
-                initialValue: currentValue,
-                onSelected: (value) {
-                  if (value != -1) {
-                    onChanged(value);
-                  }
-                },
-                offset: const Offset(0, 40),
-                itemBuilder: (context) => [
-                  ...intervalOptions.map((opt) {
-                    final sel = opt.$2 == currentValue;
-                    return PopupMenuItem<int>(
-                      value: opt.$2,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(opt.$1),
-                          if (sel) ...[
-                            const SizedBox(width: 8),
-                            const Icon(
-                              Icons.check,
-                              size: 18,
-                              color: Color(0xFFe94560),
-                            ),
-                          ],
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0f3460),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        selectedLabel,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.arrow_drop_down, color: Colors.white70),
-                    ],
-                  ),
-                ),
+              Text(
+                intervalLabel(intervals[sliderIndex]),
+                style: const TextStyle(color: Colors.grey),
               ),
             ],
+          ),
+          Slider(
+            value: sliderIndex.toDouble(),
+            min: 0,
+            max: (intervals.length - 1).toDouble(),
+            divisions: intervals.length - 1,
+            label: intervalLabel(intervals[sliderIndex]),
+            // 自定义开启时档位不生效，滑块仅保留原有位置
+            onChanged: useCustomInterval
+                ? null
+                : (value) => onChanged(intervals[value.round()]),
+            activeColor: const Color(0xFFe94560),
           ),
           // 自定义间隔输入（独立一行）
           const SizedBox(height: 12),
           Row(
             children: [
-              Text(
-                '自定义',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isCustom ? const Color(0xFFe94560) : Colors.white70,
+              // 左侧整组占满剩余宽度：标签后紧跟输入框与单位，多余空白落在开关之前
+              Expanded(
+                child: Row(
+                  children: [
+                    // 空间不足时优先收缩标签，避免整行溢出
+                    Flexible(
+                      child: Text(
+                        l10n.customIntervalLabel,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 80,
+                      height: 38,
+                      child: _CustomInlineInput(
+                        initialValue: customInterval ~/ 1000,
+                        enabled: useCustomInterval,
+                        onSubmit: (seconds) => onCustomChanged(seconds * 1000),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      l10n.second,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 12),
-              SizedBox(
-                width: 80,
-                height: 38,
-                child: _CustomInlineInput(
-                  initialValue: customInterval ~/ 1000,
-                  onSubmit: (seconds) {
-                    final ms = seconds * 1000;
-                    onChanged(ms);
-                    onCustomChanged(ms);
-                  },
-                ),
+              Switch(
+                value: useCustomInterval,
+                onChanged: onUseCustomChanged,
+                activeThumbColor: const Color(0xFFe94560),
               ),
-              const SizedBox(width: 8),
-              const Text(
-                '秒',
-                style: TextStyle(color: Colors.grey, fontSize: 14),
-              ),
-              if (isCustom) ...[
-                const SizedBox(width: 8),
-                const Icon(Icons.check, size: 18, color: Color(0xFFe94560)),
-              ],
             ],
           ),
         ],
@@ -580,8 +683,9 @@ class SettingsScreen extends StatelessWidget {
     String title,
     List<(String, T)> options,
     T value,
-    void Function(T) onChanged,
-  ) {
+    void Function(T) onChanged, {
+    String subtitle = '',
+  }) {
     final selectedLabel = options
         .firstWhere((o) => o.$2 == value, orElse: () => options.first)
         .$1;
@@ -591,7 +695,20 @@ class SettingsScreen extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(title, style: Theme.of(context).textTheme.bodyLarge),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.bodyLarge),
+                if (subtitle.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      subtitle,
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ),
+              ],
+            ),
           ),
           PopupMenuButton<T>(
             initialValue: value,
@@ -642,15 +759,24 @@ class SettingsScreen extends StatelessWidget {
   }
 
   Widget _buildShortcutInfo(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final shortcuts = [
-      ('空格', '播放/暂停'),
-      ('←', '上一张'),
-      ('→', '下一张'),
-      ('R', '重新扫描'),
-      ('ESC', '退出播放'),
-      ('F11', '全屏切换'),
-      ('Del', '删除图片'),
+      (l10n.spaceKey, l10n.playPause),
+      ('←', l10n.previous),
+      ('→', l10n.next),
+      ('↑', l10n.zoomIn),
+      ('↓', l10n.zoomOut),
+      ('R', l10n.rotateRight),
+      ('L', l10n.rotateLeft),
+      ('ESC', l10n.exitFullscreen),
+      ('F11', l10n.toggleFullscreen),
+      ('Del', l10n.deleteImage),
     ];
+
+    // 快捷键条目较多，均分到左右两列显示，避免面板过高
+    final half = (shortcuts.length + 1) ~/ 2;
+    final leftColumn = shortcuts.take(half).toList();
+    final rightColumn = shortcuts.skip(half).toList();
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -666,9 +792,9 @@ class SettingsScreen extends StatelessWidget {
             children: [
               Icon(Icons.keyboard, size: 20, color: Colors.blueAccent.shade200),
               const SizedBox(width: 8),
-              const Text(
-                '内置快捷键',
-                style: TextStyle(
+              Text(
+                l10n.shortcutTitle,
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                   color: Colors.blueAccent,
@@ -677,41 +803,67 @@ class SettingsScreen extends StatelessWidget {
             ],
           ),
           const Divider(height: 20, color: Colors.white12),
-          ...shortcuts.map(
-            (s) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black26,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: Colors.white24),
-                    ),
-                    child: Text(
-                      s.$1,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(
-                      s.$2,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.white70,
-                      ),
-                    ),
-                  ),
-                ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final shortcut in leftColumn)
+                      _buildShortcutRow(shortcut),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final shortcut in rightColumn)
+                      _buildShortcutRow(shortcut),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 单条快捷键：左侧按键标签 + 右侧说明文字。
+  ///
+  /// 说明文字用 [Expanded] 约束宽度，列较窄时自动换行而不是溢出。
+  Widget _buildShortcutRow((String, String) shortcut) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black26,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Text(
+              shortcut.$1,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                shortcut.$2,
+                style: const TextStyle(fontSize: 14, color: Colors.white70),
               ),
             ),
           ),
@@ -721,13 +873,26 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-/// 内嵌在 PopupMenu 中的自定义秒数输入组件
+/// 设置页中的一个分组（一个标题 + 若干选项控件）。
+class _SettingsGroup {
+  const _SettingsGroup({required this.widgets, required this.weight});
+
+  /// 该分组包含的控件（标题与各选项）。
+  final List<Widget> widgets;
+
+  /// 分组高度的粗略估算，仅用于宽屏分栏时均衡各列高度。
+  final int weight;
+}
+
+/// 换片时间设置里的自定义秒数输入组件
 class _CustomInlineInput extends StatefulWidget {
   final int initialValue;
+  final bool enabled;
   final void Function(int) onSubmit;
 
   const _CustomInlineInput({
     required this.initialValue,
+    this.enabled = true,
     required this.onSubmit,
   });
 
@@ -769,8 +934,12 @@ class _CustomInlineInputState extends State<_CustomInlineInput> {
   Widget build(BuildContext context) {
     return TextField(
       controller: _controller,
+      enabled: widget.enabled,
       keyboardType: TextInputType.number,
-      style: const TextStyle(fontSize: 13, color: Colors.white),
+      style: TextStyle(
+        fontSize: Theme.of(context).textTheme.bodyLarge?.fontSize,
+        color: Colors.white,
+      ),
       decoration: InputDecoration(
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
