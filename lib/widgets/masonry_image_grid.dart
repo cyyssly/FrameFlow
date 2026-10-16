@@ -92,15 +92,31 @@ class MasonryImageGrid extends StatelessWidget {
   final List<ImageItem> items;
   final int? selectedIndex;
   final ValueChanged<int> onTap;
-  final void Function(int index) onPrimaryAction;
-  final void Function(int index) onDelete;
-  final void Function(int index) onMove;
-  final void Function(int index) onCopy;
 
-  /// 主操作按钮的图标、颜色、提示文字
-  final IconData primaryIcon;
-  final Color primaryColor;
-  final String primaryTooltip;
+  /// 长按回调（可选）。文件夹图片页用它直接进入幻灯播放。
+  final void Function(int index)? onLongPress;
+
+  /// 「删除类」操作的回调。
+  ///
+  /// 四按钮模式下它是「删除」按钮；单按钮模式下它就是那个唯一的按钮，
+  /// 实际行为（排除播放 / 实际删除）由调用方按当前设置决定。
+  final void Function(int index) onDelete;
+
+  /// 覆盖层是否只显示右下角的单个按钮（文件夹图片页使用）
+  final bool singleActionOverlay;
+
+  /// 单按钮模式下按钮的图标、颜色与提示文字
+  final IconData singleActionIcon;
+  final Color singleActionColor;
+  final String? singleActionTooltip;
+
+  // ── 以下为四按钮模式（已排除图片页）所需的参数 ──
+  final void Function(int index)? onPrimaryAction;
+  final void Function(int index)? onMove;
+  final void Function(int index)? onCopy;
+  final IconData? primaryIcon;
+  final Color? primaryColor;
+  final String? primaryTooltip;
 
   /// 是否还有更多数据可加载（滚动到底部时触发 [onLoadMore]）
   final bool hasMore;
@@ -117,17 +133,31 @@ class MasonryImageGrid extends StatelessWidget {
     required this.items,
     required this.selectedIndex,
     required this.onTap,
-    required this.onPrimaryAction,
+    this.onLongPress,
     required this.onDelete,
-    required this.onMove,
-    required this.onCopy,
-    required this.primaryIcon,
-    required this.primaryColor,
-    required this.primaryTooltip,
+    this.singleActionOverlay = false,
+    this.singleActionIcon = Icons.delete_outline,
+    this.singleActionColor = Colors.redAccent,
+    this.singleActionTooltip,
+    this.onPrimaryAction,
+    this.onMove,
+    this.onCopy,
+    this.primaryIcon,
+    this.primaryColor,
+    this.primaryTooltip,
     this.hasMore = false,
     this.onLoadMore,
     this.prefetchExtent,
-  });
+  }) : assert(
+         singleActionOverlay ||
+             (onPrimaryAction != null &&
+                 onMove != null &&
+                 onCopy != null &&
+                 primaryIcon != null &&
+                 primaryColor != null &&
+                 primaryTooltip != null),
+         '四按钮模式必须提供主操作/移动到/复制到回调及其图标、颜色、提示文字',
+       );
 
   @override
   Widget build(BuildContext context) {
@@ -172,10 +202,19 @@ class MasonryImageGrid extends StatelessWidget {
                       item: items[index],
                       isSelected: selectedIndex == index,
                       onTap: () => onTap(index),
-                      onPrimary: () => onPrimaryAction(index),
+                      onLongPress: onLongPress == null
+                          ? null
+                          : () => onLongPress!(index),
                       onDelete: () => onDelete(index),
-                      onMove: () => onMove(index),
-                      onCopy: () => onCopy(index),
+                      singleActionOverlay: singleActionOverlay,
+                      singleActionIcon: singleActionIcon,
+                      singleActionColor: singleActionColor,
+                      singleActionTooltip: singleActionTooltip,
+                      onPrimary: onPrimaryAction == null
+                          ? null
+                          : () => onPrimaryAction!(index),
+                      onMove: onMove == null ? null : () => onMove!(index),
+                      onCopy: onCopy == null ? null : () => onCopy!(index),
                       primaryIcon: primaryIcon,
                       primaryColor: primaryColor,
                       primaryTooltip: primaryTooltip,
@@ -210,25 +249,39 @@ class _MasonryImageCard extends StatefulWidget {
   final ImageItem item;
   final bool isSelected;
   final VoidCallback onTap;
-  final VoidCallback onPrimary;
+  final VoidCallback? onLongPress;
   final VoidCallback onDelete;
-  final VoidCallback onMove;
-  final VoidCallback onCopy;
-  final IconData primaryIcon;
-  final Color primaryColor;
-  final String primaryTooltip;
+
+  /// 覆盖层是否只显示右下角的单个按钮
+  final bool singleActionOverlay;
+  final IconData singleActionIcon;
+  final Color singleActionColor;
+  final String? singleActionTooltip;
+
+  // ── 四按钮模式（已排除图片页）所需的回调与样式 ──
+  final VoidCallback? onPrimary;
+  final VoidCallback? onMove;
+  final VoidCallback? onCopy;
+  final IconData? primaryIcon;
+  final Color? primaryColor;
+  final String? primaryTooltip;
 
   const _MasonryImageCard({
     required this.item,
     required this.isSelected,
     required this.onTap,
-    required this.onPrimary,
+    this.onLongPress,
     required this.onDelete,
-    required this.onMove,
-    required this.onCopy,
-    required this.primaryIcon,
-    required this.primaryColor,
-    required this.primaryTooltip,
+    required this.singleActionOverlay,
+    required this.singleActionIcon,
+    required this.singleActionColor,
+    this.singleActionTooltip,
+    this.onPrimary,
+    this.onMove,
+    this.onCopy,
+    this.primaryIcon,
+    this.primaryColor,
+    this.primaryTooltip,
   });
 
   @override
@@ -242,6 +295,7 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
       child: MouseRegion(
         onEnter: (_) => setState(() => _isHovered = true),
         onExit: (_) => setState(() => _isHovered = false),
@@ -285,6 +339,25 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
   }
 
   Widget _buildOverlay(BuildContext context) {
+    final loc = AppLocalizations.of(context);
+
+    // 单按钮模式：仅右下角一个「删除类」按钮（文件夹图片页使用），
+    // 实际行为（排除播放 / 实际删除）由调用方按当前设置决定。
+    if (widget.singleActionOverlay) {
+      return Container(
+        color: Colors.black.withValues(alpha: 0.45),
+        alignment: Alignment.bottomRight,
+        padding: const EdgeInsets.all(8),
+        child: _iconButton(
+          widget.singleActionIcon,
+          widget.singleActionColor,
+          widget.singleActionTooltip ?? loc.deleteImage,
+          widget.onDelete,
+        ),
+      );
+    }
+
+    // 四按钮模式：居中 2×2 布局（已排除图片页使用）
     return Container(
       color: Colors.black.withValues(alpha: 0.45),
       child: Center(
@@ -295,16 +368,16 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _iconButton(
-                  widget.primaryIcon,
-                  widget.primaryColor,
-                  widget.primaryTooltip,
-                  widget.onPrimary,
+                  widget.primaryIcon!,
+                  widget.primaryColor!,
+                  widget.primaryTooltip!,
+                  widget.onPrimary!,
                 ),
                 const SizedBox(width: 8),
                 _iconButton(
                   Icons.delete_outline,
                   Colors.redAccent,
-                  AppLocalizations.of(context).deleteImage,
+                  loc.deleteImage,
                   widget.onDelete,
                 ),
               ],
@@ -316,15 +389,15 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
                 _iconButton(
                   Icons.drive_file_move_outline,
                   Colors.lightBlue,
-                  AppLocalizations.of(context).moveTo,
-                  widget.onMove,
+                  loc.moveTo,
+                  widget.onMove!,
                 ),
                 const SizedBox(width: 8),
                 _iconButton(
                   Icons.content_copy,
                   Colors.greenAccent,
-                  AppLocalizations.of(context).copyTo,
-                  widget.onCopy,
+                  loc.copyTo,
+                  widget.onCopy!,
                 ),
               ],
             ),

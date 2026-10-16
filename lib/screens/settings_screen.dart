@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
@@ -8,6 +10,12 @@ class SettingsScreen extends StatelessWidget {
 
   /// 宽度达到该值时分左右两栏显示，否则保持单栏。
   static const double _twoColumnBreakpoint = 900;
+
+  /// 是否为手机端。
+  ///
+  /// 手机端应用本身就是独占全屏的，窗口化的「全屏」概念不存在，
+  /// 因此「播放时自动全屏」这类桌面专属选项在手机端不展示。
+  static bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +90,10 @@ class SettingsScreen extends StatelessWidget {
                       AppLocalizations.of(context).sequential,
                       PlayOrder.sequential,
                     ),
-                    (AppLocalizations.of(context).randomPlay, PlayOrder.random),
+                    (
+                      AppLocalizations.of(context).playReverse,
+                      PlayOrder.reverseSequential,
+                    ),
                     (
                       AppLocalizations.of(context).newestFirst,
                       PlayOrder.newestFirst,
@@ -91,6 +102,7 @@ class SettingsScreen extends StatelessWidget {
                       AppLocalizations.of(context).oldestFirst,
                       PlayOrder.oldestFirst,
                     ),
+                    (AppLocalizations.of(context).randomPlay, PlayOrder.random),
                     (
                       AppLocalizations.of(context).newPreferred,
                       PlayOrder.newPreferred,
@@ -113,13 +125,15 @@ class SettingsScreen extends StatelessWidget {
                   settings.autoPlay,
                   (value) => settings.setAutoPlay(value),
                 ),
-                _buildSwitchSetting(
-                  context,
-                  AppLocalizations.of(context).startFullscreen,
-                  '',
-                  settings.startFullscreen,
-                  (value) => settings.setStartFullscreen(value),
-                ),
+                // 手机端本就独占全屏，该选项不展示
+                if (!_isMobile)
+                  _buildSwitchSetting(
+                    context,
+                    AppLocalizations.of(context).startFullscreen,
+                    '',
+                    settings.startFullscreen,
+                    (value) => settings.setStartFullscreen(value),
+                  ),
               ],
             ),
           ),
@@ -342,20 +356,22 @@ class SettingsScreen extends StatelessWidget {
           Consumer<SettingsProvider>(
             builder: (context, settings, child) => Column(
               children: [
-                _buildDropdownSetting(
-                  context,
-                  AppLocalizations.of(context).wheelSwitch,
-                  [
-                    (AppLocalizations.of(context).wheelSwitchImage, true),
-                    (AppLocalizations.of(context).wheelZoom, false),
-                  ],
-                  settings.wheelSwitchImage,
-                  (value) => settings.setWheelSwitchImage(value),
-                  // 说明修饰键滚轮执行的是与当前设置相反的行为
-                  subtitle: settings.wheelSwitchImage
-                      ? AppLocalizations.of(context).ctrlWheelZoomHint
-                      : AppLocalizations.of(context).ctrlWheelSwitchHint,
-                ),
+                // 手机端没有滚轮，该选项不展示
+                if (!_isMobile)
+                  _buildDropdownSetting(
+                    context,
+                    AppLocalizations.of(context).wheelSwitch,
+                    [
+                      (AppLocalizations.of(context).wheelSwitchImage, true),
+                      (AppLocalizations.of(context).wheelZoom, false),
+                    ],
+                    settings.wheelSwitchImage,
+                    (value) => settings.setWheelSwitchImage(value),
+                    // 说明修饰键滚轮执行的是与当前设置相反的行为
+                    subtitle: settings.wheelSwitchImage
+                        ? AppLocalizations.of(context).ctrlWheelZoomHint
+                        : AppLocalizations.of(context).ctrlWheelSwitchHint,
+                  ),
                 _buildDropdownSetting(
                   context,
                   AppLocalizations.of(context).deleteBehavior,
@@ -371,12 +387,16 @@ class SettingsScreen extends StatelessWidget {
                   ],
                   settings.deleteAction,
                   (value) => settings.setDeleteAction(value),
-                  // 说明修饰键 + Del 执行的是与当前设置相反的行为
-                  subtitle: settings.deleteAction == DeleteAction.exclude
-                      ? AppLocalizations.of(context).ctrlDelDeleteHint
-                      : AppLocalizations.of(context).ctrlDelExcludeHint,
+                  // 说明修饰键 + Del 执行的是与当前设置相反的行为；
+                  // 手机端没有 Ctrl 键，不显示该提示
+                  subtitle: _isMobile
+                      ? ''
+                      : (settings.deleteAction == DeleteAction.exclude
+                            ? AppLocalizations.of(context).ctrlDelDeleteHint
+                            : AppLocalizations.of(context).ctrlDelExcludeHint),
                 ),
-                _buildShortcutInfo(context),
+                // 内置快捷键说明全部是键盘按键，手机端不展示
+                if (!_isMobile) _buildShortcutInfo(context),
               ],
             ),
           ),

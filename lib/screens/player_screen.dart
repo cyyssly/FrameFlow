@@ -1,10 +1,6 @@
 import 'dart:async';
-// dart:ffi 也导出了 Size（原生 size_t 结构体），会与 dart:ui 的 Size 冲突，
-// 本文件只用到 PowerSqlite/指针相关类型，故隐藏掉它的 Size。
-import 'dart:ffi' hide Size;
 import 'dart:io';
 import 'dart:math' as math;
-import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +10,7 @@ import 'package:image/image.dart' as img;
 import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/l10n/app_localizations.dart';
+import 'package:slide_show/services/fullscreen_service.dart';
 import 'package:slide_show/utils/rotated_fit.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -195,8 +192,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 请求焦点以接收键盘事件
 
-      // 如果设置了自动全屏，先进入全屏再开始播放
-      if (settings.startFullscreen) {
+      // 如果设置了自动全屏，先进入全屏再开始播放。
+      // 手机端应用本身就是独占全屏的，不存在窗口化的「全屏」概念，
+      // 因此该设置只对桌面端生效（设置页在手机端也不展示这一项）。
+      final startFullscreen =
+          settings.startFullscreen && !Platform.isAndroid && !Platform.isIOS;
+      if (startFullscreen) {
         // 延迟更长时间再进入全屏，确保窗口完全就绪
         Future.delayed(const Duration(milliseconds: 300), () {
           _enterFullscreen();
@@ -287,83 +288,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     // 确保退出全屏状态，但不调用 setState
     if (_isFullscreen) {
-      _restoreWindowState();
+      FullscreenService.instance.exit();
     }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     // 恢复所有屏幕方向
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
-  }
-
-  /// 仅恢复窗口状态，不调用 setState，用于 dispose 时调用
-  void _restoreWindowState() {
-    if (Platform.isWindows && _originalStyle != null) {
-      try {
-        final user32 = DynamicLibrary.open('user32.dll');
-
-        // 获取前台窗口句柄
-        final getForegroundWindow = user32
-            .lookupFunction<IntPtr Function(), int Function()>(
-              'GetForegroundWindow',
-            );
-        var hwnd = getForegroundWindow();
-
-        // 如果获取不到前台窗口，尝试通过窗口标题查找
-        if (hwnd == 0) {
-          final findWindowW = user32
-              .lookupFunction<
-                IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
-                int Function(Pointer<Utf16>, Pointer<Utf16>)
-              >('FindWindowW');
-          hwnd = findWindowW(nullptr, 'FrameFlow'.toNativeUtf16());
-        }
-
-        if (hwnd != 0) {
-          // 恢复原始窗口样式
-          final setWindowLongPtr = user32
-              .lookupFunction<
-                IntPtr Function(IntPtr, Int32, IntPtr),
-                int Function(int, int, int)
-              >('SetWindowLongPtrW');
-          setWindowLongPtr(hwnd, -16, _originalStyle!);
-
-          // 恢复窗口到原始位置和大小
-          final setWindowPos = user32
-              .lookupFunction<
-                Int32 Function(
-                  IntPtr,
-                  IntPtr,
-                  Int32,
-                  Int32,
-                  Int32,
-                  Int32,
-                  Uint32,
-                ),
-                int Function(int, int, int, int, int, int, int)
-              >('SetWindowPos');
-          const hwndNotopmost = -2;
-
-          if (_originalX != null &&
-              _originalY != null &&
-              _originalWidth != null &&
-              _originalHeight != null) {
-            setWindowPos(
-              hwnd,
-              hwndNotopmost,
-              _originalX!,
-              _originalY!,
-              _originalWidth!,
-              _originalHeight!,
-              0,
-            );
-          } else {
-            setWindowPos(hwnd, hwndNotopmost, 0, 0, 800, 600, 0);
-          }
-        }
-      } catch (_) {
-        // 忽略错误
-      }
-    }
   }
 
   /// 暂停播放
@@ -605,6 +535,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // 顺序/最新/最旧模式：检查是否到达最后一张图片
       final isSequentialOrder =
           settings.playOrder == PlayOrder.sequential ||
+          settings.playOrder == PlayOrder.reverseSequential ||
           settings.playOrder == PlayOrder.newestFirst ||
           settings.playOrder == PlayOrder.oldestFirst;
       if (isSequentialOrder &&
@@ -865,212 +796,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  // 存储原始窗口样式和位置
-  int? _originalStyle;
-  int? _originalX, _originalY, _originalWidth, _originalHeight;
-  // 全屏状态
-  bool _isFullscreen = false;
+  /// 全屏状态由 [FullscreenService] 统一维护（播放页与瀑布流浏览页共用）
+  bool get _isFullscreen => FullscreenService.instance.isFullscreen;
 
   void _enterFullscreen() {
-    // Windows 平台实现真正的独占全屏
-    if (Platform.isWindows) {
-      try {
-        final user32 = DynamicLibrary.open('user32.dll');
-
-        // 获取前台窗口句柄
-        final getForegroundWindow = user32
-            .lookupFunction<IntPtr Function(), int Function()>(
-              'GetForegroundWindow',
-            );
-        var hwnd = getForegroundWindow();
-
-        // 如果获取不到前台窗口，尝试通过窗口标题查找
-        if (hwnd == 0) {
-          final findWindowW = user32
-              .lookupFunction<
-                IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
-                int Function(Pointer<Utf16>, Pointer<Utf16>)
-              >('FindWindowW');
-          hwnd = findWindowW(nullptr, 'FrameFlow'.toNativeUtf16());
-        }
-
-        // 如果仍然获取不到窗口句柄，直接返回
-        if (hwnd == 0) {
-          return;
-        }
-
-        // 先激活窗口，确保获取的是正确的窗口句柄
-        final setForegroundWindow = user32
-            .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
-              'SetForegroundWindow',
-            );
-        setForegroundWindow(hwnd);
-
-        // 获取屏幕分辨率
-        final getSystemMetrics = user32
-            .lookupFunction<Int32 Function(Int32), int Function(int)>(
-              'GetSystemMetrics',
-            );
-        final screenWidth = getSystemMetrics(0); // SM_CXSCREEN
-        final screenHeight = getSystemMetrics(1); // SM_CYSCREEN
-
-        // 保存原始窗口样式
-        final getWindowLongPtr = user32
-            .lookupFunction<
-              IntPtr Function(IntPtr, Int32),
-              int Function(int, int)
-            >('GetWindowLongPtrW');
-        _originalStyle = getWindowLongPtr(hwnd, -16); // GWL_STYLE
-
-        // 保存原始窗口位置和大小（使用 calloc 分配内存）
-        final getWindowRect = user32
-            .lookupFunction<
-              Int32 Function(IntPtr, Pointer<Int32>),
-              int Function(int, Pointer<Int32>)
-            >('GetWindowRect');
-        final rect = calloc<Int32>(4);
-        getWindowRect(hwnd, rect);
-        _originalX = rect[0];
-        _originalY = rect[1];
-        _originalWidth = rect[2] - rect[0];
-        _originalHeight = rect[3] - rect[1];
-        calloc.free(rect);
-
-        // 移除窗口边框和标题栏
-        final setWindowLongPtr = user32
-            .lookupFunction<
-              IntPtr Function(IntPtr, Int32, IntPtr),
-              int Function(int, int, int)
-            >('SetWindowLongPtrW');
-        const wsOverlappedwindow = 0x00CF0000;
-        const wsPopup = 0x80000000;
-        setWindowLongPtr(
-          hwnd,
-          -16,
-          _originalStyle! & ~wsOverlappedwindow | wsPopup,
-        );
-
-        // 设置窗口覆盖整个屏幕
-        final setWindowPos = user32
-            .lookupFunction<
-              Int32 Function(
-                IntPtr,
-                IntPtr,
-                Int32,
-                Int32,
-                Int32,
-                Int32,
-                Uint32,
-              ),
-              int Function(int, int, int, int, int, int, int)
-            >('SetWindowPos');
-        // 使用 HWND_TOPMOST 确保窗口在最顶层
-        setWindowPos(
-          hwnd,
-          -1,
-          0,
-          0,
-          screenWidth,
-          screenHeight,
-          0,
-        ); // HWND_TOPMOST
-      } catch (_) {
-        // 忽略错误
-      }
-    }
-    // 更新全屏状态
+    // Windows 平台由 FullscreenService 实现真正的独占全屏
     setState(() {
-      _isFullscreen = true;
+      FullscreenService.instance.enter();
     });
   }
 
   void _exitFullscreen() {
-    // Windows 平台恢复窗口
-    if (Platform.isWindows) {
-      try {
-        final user32 = DynamicLibrary.open('user32.dll');
-
-        // 获取前台窗口句柄
-        final getForegroundWindow = user32
-            .lookupFunction<IntPtr Function(), int Function()>(
-              'GetForegroundWindow',
-            );
-        var hwnd = getForegroundWindow();
-
-        // 如果获取不到前台窗口，尝试通过窗口标题查找
-        if (hwnd == 0) {
-          final findWindowW = user32
-              .lookupFunction<
-                IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
-                int Function(Pointer<Utf16>, Pointer<Utf16>)
-              >('FindWindowW');
-          hwnd = findWindowW(nullptr, 'FrameFlow'.toNativeUtf16());
-        }
-
-        // 如果仍然获取不到窗口句柄，直接返回
-        if (hwnd == 0) {
-          return;
-        }
-
-        // 恢复原始窗口样式
-        if (_originalStyle != null) {
-          final setWindowLongPtr = user32
-              .lookupFunction<
-                IntPtr Function(IntPtr, Int32, IntPtr),
-                int Function(int, int, int)
-              >('SetWindowLongPtrW');
-          setWindowLongPtr(hwnd, -16, _originalStyle!);
-
-          // 恢复窗口到原始位置和大小
-          final setWindowPos = user32
-              .lookupFunction<
-                Int32 Function(
-                  IntPtr,
-                  IntPtr,
-                  Int32,
-                  Int32,
-                  Int32,
-                  Int32,
-                  Uint32,
-                ),
-                int Function(int, int, int, int, int, int, int)
-              >('SetWindowPos');
-          const hwndNotopmost = -2; // 取消最顶层状态
-
-          if (_originalX != null &&
-              _originalY != null &&
-              _originalWidth != null &&
-              _originalHeight != null) {
-            // 使用原始位置和大小恢复窗口，同时取消最顶层状态
-            setWindowPos(
-              hwnd,
-              hwndNotopmost,
-              _originalX!,
-              _originalY!,
-              _originalWidth!,
-              _originalHeight!,
-              0, // 移除 SWP_NOACTIVATE，允许窗口自动激活
-            );
-          } else {
-            // 如果没有保存原始位置，使用默认恢复
-            setWindowPos(hwnd, hwndNotopmost, 0, 0, 800, 600, 0);
-          }
-
-          // 在窗口样式和位置恢复后，再次显式激活窗口确保获取焦点
-          final setForegroundWindow = user32
-              .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
-                'SetForegroundWindow',
-              );
-          setForegroundWindow(hwnd);
-        }
-      } catch (_) {
-        // 忽略错误
-      }
-    }
+    // Windows 平台由 FullscreenService 恢复窗口
+    FullscreenService.instance.exit();
     // 更新全屏状态
     setState(() {
       _showControls = true;
-      _isFullscreen = false;
     });
     // 重启自动隐藏定时器
     _hideControlsDelayed();
@@ -1780,20 +1521,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
           child: child,
         );
-      case TransitionAnimation.slideRight:
-        return AnimatedSwitcher(
-          duration: Duration(
-            milliseconds: (settings.animationDuration * 1000).toInt(),
-          ),
-          transitionBuilder: (child, animation) => SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(-1, 0),
-              end: Offset.zero,
-            ).animate(animation),
-            child: child,
-          ),
-          child: child,
-        );
       case TransitionAnimation.slideUp:
         return AnimatedSwitcher(
           duration: Duration(
@@ -1802,20 +1529,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           transitionBuilder: (child, animation) => SlideTransition(
             position: Tween<Offset>(
               begin: const Offset(0, 1),
-              end: Offset.zero,
-            ).animate(animation),
-            child: child,
-          ),
-          child: child,
-        );
-      case TransitionAnimation.slideDown:
-        return AnimatedSwitcher(
-          duration: Duration(
-            milliseconds: (settings.animationDuration * 1000).toInt(),
-          ),
-          transitionBuilder: (child, animation) => SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, -1),
               end: Offset.zero,
             ).animate(animation),
             child: child,
@@ -2031,9 +1744,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           context,
                                         ).deleteFileLabel,
                                   child: IconButton(
-                                    icon: const Icon(
-                                      Icons.delete,
-                                      color: Colors.red,
+                                    icon: Icon(
+                                      settings.deleteAction ==
+                                              DeleteAction.exclude
+                                          ? Icons.block
+                                          : Icons.delete,
+                                      color:
+                                          settings.deleteAction ==
+                                              DeleteAction.exclude
+                                          ? Colors.orange
+                                          : Colors.red,
                                     ),
                                     onPressed: _showDeleteConfirmation,
                                   ),
@@ -2214,6 +1934,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ],
                           ),
                         ),
+                        // 全屏播放时鼠标应与工具栏同时隐藏、同时出现：
+                        // 工具栏隐藏期间在最上层铺一层「不显示光标」的透明区域。
+                        // opaque:false 保证它不拦截下方控件（例如放大后的复位按钮）。
+                        if (!_showControls)
+                          const MouseRegion(
+                            cursor: SystemMouseCursors.none,
+                            opaque: false,
+                          ),
                       ],
                     ),
                   );

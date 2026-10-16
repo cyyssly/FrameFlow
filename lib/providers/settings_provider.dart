@@ -2,20 +2,24 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum PlayOrder { sequential, random, newestFirst, oldestFirst, newPreferred }
+/// 播放顺序
+///
+/// 新增项必须追加在末尾：该枚举按下标持久化到 SharedPreferences，
+/// 插在中间会让老用户已保存的下标含义错位。
+enum PlayOrder {
+  sequential,
+  random,
+  newestFirst,
+  oldestFirst,
+  newPreferred,
+  reverseSequential, // 逆序播放（按文件名降序）
+}
 
 enum ImageFitMode { contain, cover, original }
 
 enum BackgroundColor { black, darkGray, white }
 
-enum TransitionAnimation {
-  none,
-  fade,
-  slideLeft,
-  slideRight,
-  slideUp,
-  slideDown,
-}
+enum TransitionAnimation { none, fade, slideLeft, slideUp }
 
 enum DeleteAction {
   exclude, // 排除播放
@@ -32,8 +36,8 @@ enum ImageOrientation {
 class SettingsProvider extends ChangeNotifier {
   // 播放基础设置
   // 换片时间的滑块档位值（毫秒），自定义开关关闭时生效
-  int _interval = 5000;
-  PlayOrder _playOrder = PlayOrder.sequential;
+  int _interval = 4000;
+  PlayOrder _playOrder = PlayOrder.newPreferred;
   bool _loopPlay = false;
   bool _autoPlay = true;
 
@@ -50,16 +54,16 @@ class SettingsProvider extends ChangeNotifier {
   bool _startFullscreen = true;
   bool _hideToolbar = true;
   int _controlsHideDelay = 3;
-  bool _keepControlsOnPause = true;
+  bool _keepControlsOnPause = false;
 
   // 文件与目录相关
-  bool _recursiveScan = false;
+  bool _recursiveScan = true;
 
   String? _lastFolderPath;
   List<String> _lastFolderPaths = [];
 
   // 信息显示设置
-  bool _showImageInfo = true;
+  bool _showImageInfo = false;
   bool _infoAutoHide = true;
   int _infoHideDelay = 3;
 
@@ -304,28 +308,34 @@ class SettingsProvider extends ChangeNotifier {
   // 加载设置
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    _interval = prefs.getInt('interval') ?? 5000;
-    _playOrder = PlayOrder.values[prefs.getInt('playOrder') ?? 0];
+    _interval = prefs.getInt('interval') ?? 4000;
+    _playOrder = PlayOrder
+        .values[prefs.getInt('playOrder') ?? PlayOrder.newPreferred.index];
     _loopPlay = prefs.getBool('loopPlay') ?? false;
     _autoPlay = prefs.getBool('autoPlay') ?? true;
     _imageFitMode = ImageFitMode.values[prefs.getInt('imageFitMode') ?? 0];
     _backgroundColor =
         BackgroundColor.values[prefs.getInt('backgroundColor') ?? 0];
-    _transitionAnimation =
-        TransitionAnimation.values[prefs.getInt('transitionAnimation') ?? 1];
+    // 下标做边界保护：旧版本枚举里还有 slideRight/slideDown，
+    // 若用户存过越界下标，直接取值会 RangeError 导致启动崩溃
+    final animationIndex = (prefs.getInt('transitionAnimation') ?? 1).clamp(
+      0,
+      TransitionAnimation.values.length - 1,
+    );
+    _transitionAnimation = TransitionAnimation.values[animationIndex];
     _animationDuration = prefs.getDouble('animationDuration') ?? 0.5;
     _startFullscreen = prefs.getBool('startFullscreen') ?? true;
     _hideToolbar = prefs.getBool('hideToolbar') ?? true;
     _controlsHideDelay = prefs.getInt('controlsHideDelay') ?? 3;
-    _keepControlsOnPause = prefs.getBool('keepControlsOnPause') ?? true;
-    _recursiveScan = prefs.getBool('recursiveScan') ?? false;
+    _keepControlsOnPause = prefs.getBool('keepControlsOnPause') ?? false;
+    _recursiveScan = prefs.getBool('recursiveScan') ?? true;
 
     _lastFolderPath = prefs.getString('lastFolderPath');
     final lastFolderPathsStr = prefs.getString('lastFolderPaths');
     if (lastFolderPathsStr != null) {
       _lastFolderPaths = json.decode(lastFolderPathsStr).cast<String>();
     }
-    _showImageInfo = prefs.getBool('showImageInfo') ?? true;
+    _showImageInfo = prefs.getBool('showImageInfo') ?? false;
     _infoAutoHide = prefs.getBool('infoAutoHide') ?? true;
     _infoHideDelay = prefs.getInt('infoHideDelay') ?? 3;
 

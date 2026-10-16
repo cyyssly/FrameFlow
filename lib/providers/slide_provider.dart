@@ -211,6 +211,9 @@ class SlideProvider extends ChangeNotifier {
         case PlayOrder.sequential:
           insertIndex = _findInsertIndexByName(image.name);
           break;
+        case PlayOrder.reverseSequential:
+          insertIndex = _findInsertIndexByNameDescending(image.name);
+          break;
         case PlayOrder.newestFirst:
           insertIndex = _findInsertIndexByTime(image.path, newestFirst: true);
           break;
@@ -274,6 +277,20 @@ class SlideProvider extends ChangeNotifier {
     return low;
   }
 
+  /// 二分查找按文件名的插入位置（列表已按文件名**降序**排列）
+  int _findInsertIndexByNameDescending(String name) {
+    int low = 0, high = _images.length;
+    while (low < high) {
+      final mid = (low + high) ~/ 2;
+      if (_images[mid].name.compareTo(name) > 0) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }
+
   /// 二分查找按修改时间的插入位置
   /// [newestFirst] = true: 从新到旧（降序），false: 从旧到新（升序）
   int _findInsertIndexByTime(String imagePath, {required bool newestFirst}) {
@@ -312,6 +329,10 @@ class SlideProvider extends ChangeNotifier {
       case PlayOrder.sequential:
         // 按文件名排序（默认）
         _images.sort((a, b) => a.name.compareTo(b.name));
+        break;
+      case PlayOrder.reverseSequential:
+        // 按文件名逆序
+        _images.sort((a, b) => b.name.compareTo(a.name));
         break;
       case PlayOrder.newestFirst:
         // 按文件修改时间从新到旧

@@ -76,7 +76,6 @@ class AppLocalizations {
   String get selectAlbum => _t('选择相册', 'Albums', '選擇相冊');
   String get selectFolder => _t('选择文件夹', 'Folders', '選擇文件夾');
   String get settings => _t('设置', 'Settings', '設置');
-  String get sponsor => _t('赞助', 'Donate', '贊助');
   String get scanning => _t('正在扫描图片...', 'Scanning...', '正在掃描圖片...');
 
   // 相册选择页
@@ -85,6 +84,7 @@ class AppLocalizations {
   String get addAlbum => _t('添加相册', 'Add Album', '添加相冊');
   String get addFolder => _t('添加文件夹', 'Add Folder', '添加文件夾');
   String get clearAll => _t('清空全部', 'Clear All', '清空全部');
+  String get playFolder => _t('播放此文件夹', 'Play This Folder', '播放此資料夾');
   String get pleaseAddAlbum => _t('请添加相册', 'Add Albums', '請添加相冊');
   String get pleaseAddFolder => _t('请添加文件夹', 'Add Folders', '請添加文件夾');
   String get confirm => _t('确定', 'OK', '確定');
@@ -102,6 +102,7 @@ class AppLocalizations {
   String get playOrderMode => _t('播放顺序', 'Play Order', '播放順序');
   String get playSettings => _t('播放设置', 'Playback', '播放設置');
   String get sequential => _t('顺序播放', 'Sequential', '順序播放');
+  String get playReverse => _t('逆序播放', 'Reverse', '逆序播放');
   String get randomPlay => _t('随机播放', 'Random', '隨機播放');
   String get newestFirst => _t('由新到旧', 'Newest First', '由新到舊');
   String get oldestFirst => _t('由旧到新', 'Oldest First', '由舊到新');
@@ -133,9 +134,7 @@ class AppLocalizations {
   String get none => _t('无动画', 'None', '無動畫');
   String get fade => _t('淡入淡出', 'Fade', '淡入淡出');
   String get slideLeft => _t('左右滑动', 'Slide Left', '左右滑動');
-  String get slideRight => _t('右左滑动', 'Slide Right', '右左滑動');
   String get slideUp => _t('上下滑动', 'Slide Up', '上下滑動');
-  String get slideDown => _t('下上滑动', 'Slide Down', '下上滑動');
   String get animDuration => _t('动画时长', 'Duration', '動畫時長');
   String get windowFullscreen => _t('工具栏', 'Toolbar', '工具欄');
   String get startFullscreen => _t('播放时自动全屏', 'Auto Fullscreen', '播放時自動全屏');
@@ -213,11 +212,6 @@ class AppLocalizations {
   String get fitScreen => _t('适应屏幕', 'Fit Screen', '適應屏幕');
   String get customIntervalLabel =>
       _t('自定义换片时间：', 'Custom interval:', '自訂換片時間：');
-  String get shortcutHint => _t(
-    'ESC: 退出播放 | F11: 全屏切换 | Del: 删除图片 | 空格: 播放/暂停 | ←→: 切换 | ↑↓: 缩放 | R/L: 旋转',
-    'ESC: Fullscreen | F11: Fullscreen Toggle | Del: Delete Image | Space: Play/Pause | ←→: Navigate | ↑↓: Zoom | R/L: Rotate',
-    'ESC: 退出播放 | F11: 全屏切換 | Del: 刪除圖片 | 空格: 播放/暫停 | ←→: 切換 | ↑↓: 縮放 | R/L: 旋轉',
-  );
   String get errorRange => _t(
     '须为大于1且小于65535的整数',
     'Enter a number between 2 and 65534',
@@ -290,8 +284,119 @@ class AppLocalizations {
   // 文件夹图片浏览
   String get noImagesInFolder =>
       _t('此文件夹中没有图片', 'No images in this folder', '此文件夾中沒有圖片');
-  String get allExcluded => _t('全部已排除', 'All excluded', '全部已排除');
-  String get excludeAll => _t('排除全部', 'Exclude All', '排除全部');
+  String get sortSequential => _t('顺序', 'Ascending', '順序');
+  String get sortReverse => _t('逆序', 'Descending', '逆序');
+  String get sortNewest => _t('最新', 'Newest', '最新');
+  String get sortOldest => _t('最旧', 'Oldest', '最舊');
+  String get sortRandom => _t('随机', 'Random', '隨機');
+
+  // 帮助页
+  String get help => _t('帮助', 'Help', '幫助');
+  String get helpDocSection => _t('说明文档', 'Documentation', '說明文檔');
+  String get helpAboutSection => _t('关于', 'About', '關於');
+  String get helpSponsorSection => _t('赞助', 'Sponsor', '贊助');
+  String get helpGroupPlay => _t('播放控制', 'Playback', '播放控制');
+  String get helpGroupDisplay => _t('图片显示', 'Image Display', '圖片顯示');
+  String get helpGroupTransition => _t('切换动画', 'Transitions', '切換動畫');
+  String get helpGroupFullscreen =>
+      _t('全屏与工具栏', 'Fullscreen & Toolbar', '全屏與工具欄');
+  String get helpGroupFolders => _t('多目录与图片管理', 'Folders & Images', '多目錄與圖片管理');
+  String get helpPlayOrder => _t(
+    '多种播放顺序：顺序、逆序、由新到旧、由旧到新、随机、新图优先',
+    'Play orders: ascending, descending, newest first, oldest first, random, new-first',
+    '多種播放順序：順序、逆序、由新到舊、由舊到新、隨機、新圖優先',
+  );
+  String get helpLoopAuto => _t(
+    '循环播放与自动播放可分别开关',
+    'Loop and auto-play can be toggled separately',
+    '循環播放與自動播放可分別開關',
+  );
+  String get helpInterval => _t(
+    '换片时间可调：预设 1 秒～10 分钟，也可自定义（2～65534 秒）',
+    'Interval: presets from 1s to 10min, or a custom value (2–65534s)',
+    '換片時間可調：預設 1 秒～10 分鐘，也可自訂（2～65534 秒）',
+  );
+  String get helpPauseZoom => _t(
+    '可随时暂停/继续；放大查看时自动暂停，点击播放即切到下一张',
+    'Pause or resume anytime; auto-pauses while zoomed, next slide on play',
+    '可隨時暫停/繼續；放大檢視時自動暫停，點擊播放即切到下一張',
+  );
+  String get helpFitMode => _t(
+    '填充模式：适应窗口、填满窗口、原图大小',
+    'Fit modes: fit window, fill window, original size',
+    '填充模式：適應窗口、填滿窗口、原圖大小',
+  );
+  String get helpBackground =>
+      _t('背景色：黑色、深灰、白色', 'Background: black, dark gray, white', '背景色：黑色、深灰、白色');
+  String get helpOrientation => _t(
+    '屏幕方向：横屏、竖屏、跟随系统、跟随图片',
+    'Orientation: landscape, portrait, follow system, follow image',
+    '螢幕方向：橫屏、豎屏、跟隨系統、跟隨圖片',
+  );
+  String get helpZoomPan => _t(
+    '缩放与平移：滚轮、触控板捏合或手势缩放（1～5 倍），放大后可左键拖动，右键呼出放大/缩小/适应屏幕/旋转菜单',
+    'Zoom & pan: wheel, trackpad pinch or gestures (1x–5x); left-drag to pan, right-click for the zoom/reset/rotate menu',
+    '縮放與平移：滾輪、觸控板捏合或手勢縮放（1～5 倍），放大後可左鍵拖動，右鍵呼出放大/縮小/適應屏幕/旋轉選單',
+  );
+  String get helpWheel => _t(
+    '鼠标滚轮可设为切换图片或缩放图片，按住 Ctrl（或 Shift）滚动执行相反操作',
+    'The wheel can switch or zoom; hold Ctrl (or Shift) to do the opposite',
+    '滑鼠滾輪可設為切換圖片或縮放圖片，按住 Ctrl（或 Shift）滾動執行相反操作',
+  );
+  String get helpTransition => _t(
+    '淡入淡出、左右滑动、上下滑动、无动画',
+    'Fade, slide horizontally, slide vertically, none',
+    '淡入淡出、左右滑動、上下滑動、無動畫',
+  );
+  String get helpAnimDuration => _t(
+    '动画时长 0.1～1.0 秒可调',
+    'Animation duration adjustable from 0.1s to 1.0s',
+    '動畫時長 0.1～1.0 秒可調',
+  );
+  String get helpFullscreen => _t(
+    'Windows 支持真·全屏，可设置进入播放时自动全屏',
+    'True fullscreen on Windows; can enter fullscreen automatically',
+    'Windows 支援真·全屏，可設定進入播放時自動全屏',
+  );
+  String get helpToolbar => _t(
+    '工具栏可自动隐藏（延迟可调），也可设置为暂停时保持显示',
+    'The toolbar auto-hides with an adjustable delay, or stays while paused',
+    '工具欄可自動隱藏（延遲可調），也可設定為暫停時保持顯示',
+  );
+  String get helpFolders => _t(
+    '可添加多个文件夹，可选择是否包含子文件夹，自动去重并统计数量',
+    'Add multiple folders, optionally include subfolders, with de-duplication and counts',
+    '可添加多個文件夾，可選擇是否包含子文件夾，自動去重並統計數量',
+  );
+  String get helpFormats => _t(
+    '支持 JPG、JPEG、PNG、WebP、BMP、GIF、TIFF 等常见格式',
+    'Supports JPG, JPEG, PNG, WebP, BMP, GIF, TIFF and more',
+    '支援 JPG、JPEG、PNG、WebP、BMP、GIF、TIFF 等常見格式',
+  );
+  String get helpExclude => _t(
+    '排除播放：把不想看的图片移出播放列表（不删除文件），已排除的图片可恢复或实际删除，也可以移动或者复制到其他位置',
+    'Exclude: remove images from the playlist without deleting files; excluded images can be restored or deleted, and can also be moved or copied elsewhere',
+    '排除播放：把不想看的圖片移出播放列表（不刪除檔案），已排除的圖片可恢復或實際刪除，也可以移動或者複製到其他位置',
+  );
+  String get helpBrowse => _t(
+    '瀑布流浏览：点击任意图片即可播放当前文件夹；文件夹右侧可直接播放该文件夹',
+    'Grid browsing: tap any image to play the folder, or use the folder play button',
+    '瀑布流瀏覽：點擊任意圖片即可播放當前文件夾；文件夾右側可直接播放該文件夾',
+  );
+  String get helpInfoDisplay => _t(
+    '可显示文件名、大小、分辨率与页码，并支持自动隐藏',
+    'Shows file name, size, resolution and page number, with auto-hide',
+    '可顯示檔案名稱、大小、解析度與頁碼，並支援自動隱藏',
+  );
+  String get helpVersionLabel => _t('版本', 'Version', '版本');
+  String get helpGitHub =>
+      _t('GitHub 项目主页', 'GitHub Repository', 'GitHub 專案主頁');
+  String get helpSponsorDesc => _t(
+    '本应用完全免费、无广告，如果它帮到了你，欢迎赞助支持。',
+    'This app is completely free and ad-free. If it helps you, a donation is welcome.',
+    '本應用完全免費、無廣告，如果它幫到了你，歡迎贊助支持。',
+  );
+  String get helpSponsorButton => _t('打开赞助页面', 'Open Sponsor Page', '打開贊助頁面');
 
   // 内部翻译方法
   String _t(String zhCN, String en, String zhTW) {

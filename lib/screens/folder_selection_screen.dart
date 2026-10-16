@@ -26,6 +26,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
   // 跟踪正在计数的文件夹
   final Set<String> _scanningFolders = {};
 
+  /// 正在为该文件夹准备播放（扫描中），用于禁用其播放按钮并显示进度
+  final Set<String> _playingFolders = {};
+
   /// 是否正在添加文件夹（含原生对话框弹出期间），用于防止重复触发
   bool _isAddingFolder = false;
 
@@ -380,6 +383,50 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       _folderStats.remove(path);
       _scanningFolders.remove(path);
     });
+  }
+
+  /// 直接播放某个已选文件夹：以该文件夹为播放范围进入幻灯
+  Future<void> _playFolder(String path) async {
+    if (_playingFolders.contains(path)) return;
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    final settingsProvider = Provider.of<SettingsProvider>(
+      context,
+      listen: false,
+    );
+
+    setState(() {
+      _playingFolders.add(path);
+    });
+
+    try {
+      final images = await _scanFolder(path, settingsProvider);
+      if (!mounted) return;
+      if (images.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context).msgNoImages),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+
+      // 与瀑布流页一致：范围限定为该文件夹，顺序按「播放顺序」设置
+      slideProvider.setImages(images, playOrder: settingsProvider.playOrder);
+      slideProvider.sortByPlayOrder(settingsProvider.playOrder);
+      slideProvider.goToImage(0);
+      slideProvider.startPlay();
+
+      if (!mounted) return;
+      Navigator.pushNamed(context, '/player');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _playingFolders.remove(path);
+        });
+      }
+    }
   }
 
   void _clearAll() {
@@ -774,9 +821,39 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: _buildFolderStats(path),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _removeFolder(path),
+                      // 播放：直接以该文件夹为范围进入幻灯；
+                      // 排除：把该文件夹移出播放列表（原「删除」按钮的动作）
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: AppLocalizations.of(context).playFolder,
+                            icon: _playingFolders.contains(path)
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.play_circle_outline,
+                                    color: Colors.green,
+                                  ),
+                            onPressed: _playingFolders.contains(path)
+                                ? null
+                                : () => _playFolder(path),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: AppLocalizations.of(
+                              context,
+                            ).excludeFromPlay,
+                            icon: const Icon(Icons.block, color: Colors.orange),
+                            onPressed: () => _removeFolder(path),
+                          ),
+                        ],
                       ),
                       onTap: () {
                         Navigator.push(

@@ -1,17 +1,24 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/settings_provider.dart';
-import 'package:slide_show/services/directory_picker_service.dart';
+import 'package:slide_show/providers/slide_provider.dart';
+import 'package:slide_show/services/fullscreen_service.dart';
 import 'package:slide_show/services/image_scan_service.dart';
 import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/widgets/masonry_image_grid.dart';
 import 'package:slide_show/l10n/app_localizations.dart';
 
+/// 瀑布流排序方式
+enum _SortMode { byName, byTime, random }
+
 /// 文件夹图片瀑布流浏览页
-/// 提供 4 个操作：排除、删除、移动到、复制到
+///
+/// 卡片悬停时只显示一个右下角按钮，其行为由「删除行为」设置决定：
+/// 排除播放或实际删除。
 class FolderImagesScreen extends StatefulWidget {
   final String folderPath;
 
@@ -39,10 +46,59 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   /// 是否正在预加载（防止重复触发）
   bool _isPreloading = false;
 
+  /// 当前排序方式
+  _SortMode _sortMode = _SortMode.byName;
+
+  /// 顺序模式下是否为升序（true = 顺序，false = 逆序）
+  bool _nameAscending = true;
+
+  /// 最新模式下是否最新在前（true = 最新，false = 最旧）
+  bool _newestFirst = true;
+
+  /// 批次代次：每次重新排序都自增，使跨越排序、尚在途中的旧批次作废，
+  /// 避免把「旧顺序下的这一批已就绪」错误地记到新顺序的批次边界上。
+  int _batchGeneration = 0;
+
   @override
   void initState() {
     super.initState();
     _loadImages();
+    HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_hardwareKeyHandler);
+    super.dispose();
+  }
+
+  /// 键盘快捷键：F11 切换全屏；全屏时按 ESC 退出全屏
+  ///
+  /// [HardwareKeyboard] 会无条件调用所有已注册的 handler，而播放页也注册了
+  /// F11/ESC，因此这里必须确认本页位于最上层，否则同一次按键会被两页各处理一次
+  /// （先进全屏再退全屏，等于没反应）。
+  bool _hardwareKeyHandler(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (ModalRoute.of(context)?.isCurrent != true) return false;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.f11) {
+      _toggleFullscreen();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.escape &&
+        FullscreenService.instance.isFullscreen) {
+      FullscreenService.instance.exit();
+      return true;
+    }
+    return false;
+  }
+
+  void _toggleFullscreen() {
+    if (FullscreenService.instance.isFullscreen) {
+      FullscreenService.instance.exit();
+    } else {
+      FullscreenService.instance.enter();
+    }
   }
 
   Future<void> _loadImages() async {
@@ -54,12 +110,19 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     if (!mounted) return;
     setState(() {
       _allItems = items;
-      _items = items.take(_pageSize).toList();
+      // 首屏按当前排序方式排列（默认：文件名顺序）
+      _applySortToAllItems();
+      _items = _allItems.take(_pageSize).toList();
       // 图片不足一页时不要记成 30，否则 _loadMore 会取到空区间
-      _loadedCount = items.length.clamp(0, _pageSize);
+      _loadedCount = _allItems.length.clamp(0, _pageSize);
       _isLoading = false;
     });
-    // 首批：先读出宽高比（决定卡片高度），再真正预解码像素
+    await _bootstrapBatches();
+  }
+
+  /// 首批加载：先读出宽高比（决定卡片高度），再真正预解码像素，
+  /// 最后预加载下一批，保证首屏与滚动时都无需等待。
+  Future<void> _bootstrapBatches() async {
     await _loadAspectRatios(_items);
     // 预解码当前批，首屏没有滚动通知，必须主动解码
     unawaited(_precacheBatch(_items));
@@ -75,12 +138,15 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     if (_isPreloading) return;
     if (_loadedCount >= _allItems.length) return;
     _isPreloading = true;
+    final generation = _batchGeneration;
     try {
       final start = _loadedCount;
       final end = (start + _pageSize).clamp(0, _allItems.length);
       final batch = _allItems.sublist(start, end);
       await _loadAspectRatios(batch);
       await _precacheBatch(batch);
+      // 期间发生过重新排序：本批属于旧顺序，直接作废
+      if (generation != _batchGeneration) return;
       // 宽高比与像素都已就绪，才允许 _loadMore 把这一批显示出来
       _loadedCount = end;
     } finally {
@@ -161,6 +227,91 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     );
   }
 
+  // ── 排序 ──
+  /// 按当前排序方式排列 [_allItems]
+  void _applySortToAllItems() {
+    switch (_sortMode) {
+      case _SortMode.byName:
+        _allItems.sort((a, b) {
+          final cmp = a.name.compareTo(b.name);
+          return _nameAscending ? cmp : -cmp;
+        });
+        break;
+      case _SortMode.byTime:
+        _allItems.sort((a, b) {
+          final cmp = _modifiedTimeOf(a).compareTo(_modifiedTimeOf(b));
+          return _newestFirst ? -cmp : cmp;
+        });
+        break;
+      case _SortMode.random:
+        _allItems.shuffle();
+        break;
+    }
+  }
+
+  /// 读取文件修改时间；读取失败时按最早处理，保证排序结果稳定
+  DateTime _modifiedTimeOf(ImageItem item) {
+    try {
+      return File(item.path).lastModifiedSync();
+    } catch (_) {
+      return DateTime.fromMillisecondsSinceEpoch(0);
+    }
+  }
+
+  /// 重新排序并重建首屏批次（顺序变化后，后续批次需按新顺序重新加载）
+  void _resort() {
+    setState(() {
+      _batchGeneration++;
+      _selectedIndex = null;
+      _applySortToAllItems();
+      _items = _allItems.take(_pageSize).toList();
+      _loadedCount = _allItems.length.clamp(0, _pageSize);
+    });
+    unawaited(_bootstrapBatches());
+  }
+
+  /// 顺序：点击切到顺序模式；已在顺序模式时，再次点击在顺序/逆序间切换
+  void _onSortByNamePressed() {
+    if (_sortMode == _SortMode.byName) {
+      _nameAscending = !_nameAscending;
+    } else {
+      _sortMode = _SortMode.byName;
+    }
+    _resort();
+  }
+
+  /// 最新：点击切到最新模式；已在最新模式时，再次点击在最新/最旧间切换
+  void _onSortByTimePressed() {
+    if (_sortMode == _SortMode.byTime) {
+      _newestFirst = !_newestFirst;
+    } else {
+      _sortMode = _SortMode.byTime;
+      _newestFirst = true;
+    }
+    _resort();
+  }
+
+  /// 随机：每次点击都重新打乱
+  void _onSortRandomPressed() {
+    _sortMode = _SortMode.random;
+    _resort();
+  }
+
+  /// 排序按钮；当前生效的排序方式用强调色标识，图标体现方向
+  Widget _buildSortButton({
+    required IconData icon,
+    required String tooltip,
+    required bool active,
+    required VoidCallback onPressed,
+  }) {
+    return IconButton(
+      icon: Icon(icon),
+      color: active ? const Color(0xFFe94560) : Colors.white70,
+      tooltip: tooltip,
+      onPressed: onPressed,
+    );
+  }
+
   // ── 单图操作 ──
   void _excludeImage(String path) {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
@@ -170,6 +321,16 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
       _allItems.removeWhere((item) => item.path == path);
     });
     _showSnack(AppLocalizations.of(context).excluded);
+  }
+
+  /// 卡片右下角按钮的统一行为：按「删除行为」设置执行排除播放或实际删除
+  void _applyDeleteAction(ImageItem item) {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    if (settings.deleteAction == DeleteAction.exclude) {
+      _excludeImage(item.path);
+    } else {
+      _deleteImage(item);
+    }
   }
 
   Future<void> _deleteImage(ImageItem item) async {
@@ -186,111 +347,27 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     _showSnack(AppLocalizations.of(context).deletedToTrash);
   }
 
-  Future<void> _moveImage(ImageItem item) async {
-    // Android 用 SAF 选择可写目录（tree uri），其他平台用 FilePicker 选择路径
-    final result = await _pickDestination();
-    if (result == null) return;
-    if (!mounted) return;
-    final ok = await MediaStoreService.moveFiles(result, [item.path]);
-    if (!mounted) return;
-    if (!ok) {
-      _showSnack(AppLocalizations.of(context).moveFailed);
-      return;
-    }
-    setState(() {
-      _items.removeWhere((i) => i.path == item.path);
-      _allItems.removeWhere((i) => i.path == item.path);
-    });
-  }
-
-  Future<void> _copyImage(ImageItem item) async {
-    // Android 用 SAF 选择可写目录（tree uri），其他平台用 FilePicker 选择路径
-    final result = await _pickDestination();
-    if (result == null) return;
-    if (!mounted) return;
-    final ok = await MediaStoreService.copyFiles(result, [item.path]);
-    if (!mounted) return;
-    if (ok) {
-      _showSnack(AppLocalizations.of(context).copySuccess);
-    } else {
-      _showSnack(AppLocalizations.of(context).copyFailed);
-    }
-  }
-
-  /// 选择移动/复制目标目录。
-  /// Android 用原生 SAF 返回 content:// tree uri；其他平台用 FilePicker 返回路径。
-  /// @return 目标标识（tree uri 或路径），取消返回 null
-  Future<String?> _pickDestination() async {
-    if (Platform.isAndroid) {
-      return MediaStoreService.pickDestinationDir();
-    }
-    return DirectoryPickerService.pickDirectory();
-  }
-
-  // ── 批量操作（作用于全部图片） ──
-  Future<void> _excludeAll() async {
+  /// 从瀑布流进入幻灯播放。
+  ///
+  /// 播放范围限定为当前文件夹：使用本次扫描到的全部图片（而不是仅已加载的
+  /// 那一批），顺序按「播放顺序」设置排列，起点为被点中的那张图片。
+  void _startPlaybackFrom(int index) {
+    if (index < 0 || index >= _items.length) return;
+    final item = _items[index];
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    for (final item in _allItems) {
-      settings.addExcludedPath(item.path);
-    }
-    setState(() {
-      _items.clear();
-      _allItems.clear();
-    });
-    _showSnack(AppLocalizations.of(context).allExcluded);
-  }
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
 
-  Future<void> _deleteAll() async {
-    final paths = _allItems.map((e) => e.path).toList();
-    final ok = await MediaStoreService.deleteToTrash(paths);
-    if (!mounted) return;
-    if (!ok) {
-      _showSnack(AppLocalizations.of(context).deleteFailed);
-      return;
-    }
-    setState(() {
-      _items.clear();
-      _allItems.clear();
-    });
-    _showSnack(AppLocalizations.of(context).deletedAllToTrash);
-  }
-
-  Future<void> _moveAll() async {
-    final result = await _pickDestination();
-    if (result == null) return;
-    if (!mounted) return;
-    final items = List<ImageItem>.from(_allItems);
-    final ok = await MediaStoreService.moveFiles(
-      result,
-      items.map((e) => e.path).toList(),
+    slideProvider.setImages(_allItems.toList(), playOrder: settings.playOrder);
+    slideProvider.sortByPlayOrder(settings.playOrder);
+    // 排序后重新定位被点中的图片；理论上必然能找到，兜底回到第一张
+    final startIndex = slideProvider.images.indexWhere(
+      (image) => image.path == item.path,
     );
-    if (!mounted) return;
-    if (ok) {
-      setState(() {
-        _items.clear();
-        _allItems.clear();
-      });
-      _showSnack(AppLocalizations.of(context).movedAllTo);
-    } else {
-      _showSnack(AppLocalizations.of(context).moveFailed);
-    }
-  }
+    slideProvider.goToImage(startIndex >= 0 ? startIndex : 0);
+    slideProvider.startPlay();
 
-  Future<void> _copyAll() async {
-    final result = await _pickDestination();
-    if (result == null) return;
-    if (!mounted) return;
-    final items = List<ImageItem>.from(_allItems);
-    final ok = await MediaStoreService.copyFiles(
-      result,
-      items.map((e) => e.path).toList(),
-    );
-    if (!mounted) return;
-    if (ok) {
-      _showSnack(AppLocalizations.of(context).copiedAllTo);
-    } else {
-      _showSnack(AppLocalizations.of(context).copyFailed);
-    }
+    setState(() => _selectedIndex = null);
+    Navigator.pushNamed(context, '/player');
   }
 
   void _showSnack(String msg) {
@@ -303,89 +380,101 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          Platform.isAndroid
-              ? _getLastPathSegment(widget.folderPath)
-              : widget.folderPath,
-          overflow: TextOverflow.ellipsis,
-        ),
-        centerTitle: true,
-        backgroundColor: const Color(0xFF16213e),
-        actions: [
-          if (_items.isNotEmpty) ...[
-            IconButton(
-              icon: const Icon(Icons.block, color: Colors.orange),
-              tooltip: loc.excludeAll,
-              onPressed: _excludeAll,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.red),
-              tooltip: loc.deleteAll,
-              onPressed: _deleteAll,
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.drive_file_move_outline,
-                color: Colors.lightBlue,
+    // 卡片右下角按钮的图标/颜色/提示随「删除行为」设置变化，需要随设置重建
+    final deleteExcludes =
+        Provider.of<SettingsProvider>(context, listen: true).deleteAction ==
+        DeleteAction.exclude;
+    // 返回上一页时先退出全屏，避免带着无边框全屏窗口回到上一页
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) FullscreenService.instance.exit();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            Platform.isAndroid
+                ? _getLastPathSegment(widget.folderPath)
+                : widget.folderPath,
+            overflow: TextOverflow.ellipsis,
+          ),
+          centerTitle: true,
+          backgroundColor: const Color(0xFF16213e),
+          actions: [
+            if (_items.isNotEmpty) ...[
+              // 顺序/逆序
+              _buildSortButton(
+                icon: _nameAscending ? Icons.sort_by_alpha : Icons.sort,
+                tooltip: _nameAscending ? loc.sortSequential : loc.sortReverse,
+                active: _sortMode == _SortMode.byName,
+                onPressed: _onSortByNamePressed,
               ),
-              tooltip: loc.moveAllTo,
-              onPressed: _moveAll,
-            ),
-            IconButton(
-              icon: const Icon(Icons.content_copy, color: Colors.greenAccent),
-              tooltip: loc.copyAllTo,
-              onPressed: _copyAll,
-            ),
+              // 最新/最旧
+              _buildSortButton(
+                icon: _newestFirst ? Icons.schedule : Icons.history,
+                tooltip: _newestFirst ? loc.sortNewest : loc.sortOldest,
+                active: _sortMode == _SortMode.byTime,
+                onPressed: _onSortByTimePressed,
+              ),
+              // 随机（每次点击重新打乱）
+              _buildSortButton(
+                icon: Icons.shuffle,
+                tooltip: loc.sortRandom,
+                active: _sortMode == _SortMode.random,
+                onPressed: _onSortRandomPressed,
+              ),
+            ],
           ],
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _items.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.image, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  Text(
-                    loc.noImagesInFolder,
-                    style: const TextStyle(color: Colors.grey, fontSize: 16),
-                  ),
-                ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _items.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.image, size: 64, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    Text(
+                      loc.noImagesInFolder,
+                      style: const TextStyle(color: Colors.grey, fontSize: 16),
+                    ),
+                  ],
+                ),
+              )
+            : MasonryImageGrid(
+                items: _items,
+                selectedIndex: _selectedIndex,
+                hasMore: _items.length < _allItems.length,
+                onLoadMore: _loadMore,
+                onTap: (index) {
+                  // 桌面端悬停即可看到删除按钮，点按直接进入播放；
+                  // 手机端没有悬停，第一次点按先显示删除按钮，再次点按才进入播放
+                  final isMobile = Platform.isAndroid || Platform.isIOS;
+                  if (!isMobile || _selectedIndex == index) {
+                    _startPlaybackFrom(index);
+                  } else {
+                    setState(() {
+                      _selectedIndex = index;
+                    });
+                  }
+                },
+                onLongPress: _startPlaybackFrom,
+                onDelete: (index) {
+                  _applyDeleteAction(_items[index]);
+                  if (mounted) setState(() => _selectedIndex = null);
+                },
+                singleActionOverlay: true,
+                singleActionIcon: deleteExcludes
+                    ? Icons.block
+                    : Icons.delete_outline,
+                singleActionColor: deleteExcludes
+                    ? Colors.orange
+                    : Colors.redAccent,
+                singleActionTooltip: deleteExcludes
+                    ? loc.excludeFromPlay
+                    : loc.deleteImage,
               ),
-            )
-          : MasonryImageGrid(
-              items: _items,
-              selectedIndex: _selectedIndex,
-              hasMore: _items.length < _allItems.length,
-              onLoadMore: _loadMore,
-              onTap: (index) {
-                setState(() {
-                  _selectedIndex = _selectedIndex == index ? null : index;
-                });
-              },
-              onPrimaryAction: (index) {
-                _excludeImage(_items[index].path);
-                if (mounted) setState(() => _selectedIndex = null);
-              },
-              onDelete: (index) {
-                _deleteImage(_items[index]);
-                if (mounted) setState(() => _selectedIndex = null);
-              },
-              onMove: (index) {
-                _moveImage(_items[index]);
-                if (mounted) setState(() => _selectedIndex = null);
-              },
-              onCopy: (index) {
-                _copyImage(_items[index]);
-              },
-              primaryIcon: Icons.block,
-              primaryColor: Colors.orange,
-              primaryTooltip: loc.excludeFromPlay,
-            ),
+      ),
     );
   }
 

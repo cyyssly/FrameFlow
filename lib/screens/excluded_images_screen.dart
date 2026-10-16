@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/services/directory_picker_service.dart';
+import 'package:slide_show/services/fullscreen_service.dart';
 import 'package:slide_show/services/image_scan_service.dart';
 import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/widgets/masonry_image_grid.dart';
@@ -29,6 +31,42 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
   void initState() {
     super.initState();
     _loadExcludedImages();
+    HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_hardwareKeyHandler);
+    super.dispose();
+  }
+
+  /// 键盘快捷键：F11 切换全屏；全屏时按 ESC 退出全屏
+  ///
+  /// [HardwareKeyboard] 会无条件调用所有已注册的 handler，而播放页也注册了
+  /// F11/ESC，因此这里必须确认本页位于最上层，否则同一次按键会被两页各处理一次
+  /// （先进全屏再退全屏，等于没反应）。
+  bool _hardwareKeyHandler(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (ModalRoute.of(context)?.isCurrent != true) return false;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.f11) {
+      _toggleFullscreen();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.escape &&
+        FullscreenService.instance.isFullscreen) {
+      FullscreenService.instance.exit();
+      return true;
+    }
+    return false;
+  }
+
+  void _toggleFullscreen() {
+    if (FullscreenService.instance.isFullscreen) {
+      FullscreenService.instance.exit();
+    } else {
+      FullscreenService.instance.enter();
+    }
   }
 
   void _loadExcludedImages() {
@@ -241,82 +279,88 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(loc.excludedFolder),
-        centerTitle: true,
-        backgroundColor: const Color(0xFF16213e),
-        actions: [
-          if (_excludedItems.isNotEmpty) ...[
-            IconButton(
-              icon: const Icon(Icons.restore, color: Colors.orange),
-              tooltip: loc.restoreAll,
-              onPressed: _restoreAll,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.red),
-              tooltip: loc.deleteAll,
-              onPressed: _deleteAll,
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.drive_file_move_outline,
-                color: Colors.lightBlue,
+    // 返回上一页时先退出全屏，避免带着无边框全屏窗口回到上一页
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) FullscreenService.instance.exit();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(loc.excludedFolder),
+          centerTitle: true,
+          backgroundColor: const Color(0xFF16213e),
+          actions: [
+            if (_excludedItems.isNotEmpty) ...[
+              IconButton(
+                icon: const Icon(Icons.restore, color: Colors.orange),
+                tooltip: loc.restoreAll,
+                onPressed: _restoreAll,
               ),
-              tooltip: loc.moveAllTo,
-              onPressed: _moveAll,
-            ),
-            IconButton(
-              icon: const Icon(Icons.content_copy, color: Colors.greenAccent),
-              tooltip: loc.copyAllTo,
-              onPressed: _copyAll,
-            ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                tooltip: loc.deleteAll,
+                onPressed: _deleteAll,
+              ),
+              IconButton(
+                icon: const Icon(
+                  Icons.drive_file_move_outline,
+                  color: Colors.lightBlue,
+                ),
+                tooltip: loc.moveAllTo,
+                onPressed: _moveAll,
+              ),
+              IconButton(
+                icon: const Icon(Icons.content_copy, color: Colors.greenAccent),
+                tooltip: loc.copyAllTo,
+                onPressed: _copyAll,
+              ),
+            ],
           ],
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _excludedItems.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.inbox, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  Text(
-                    loc.noExcludedImages,
-                    style: const TextStyle(color: Colors.grey, fontSize: 16),
-                  ),
-                ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _excludedItems.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.inbox, size: 64, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    Text(
+                      loc.noExcludedImages,
+                      style: const TextStyle(color: Colors.grey, fontSize: 16),
+                    ),
+                  ],
+                ),
+              )
+            : MasonryImageGrid(
+                items: _excludedItems,
+                selectedIndex: _selectedIndex,
+                onTap: (index) {
+                  setState(() {
+                    _selectedIndex = _selectedIndex == index ? null : index;
+                  });
+                },
+                onPrimaryAction: (index) {
+                  _restoreImage(_excludedItems[index].path);
+                  if (mounted) setState(() => _selectedIndex = null);
+                },
+                onDelete: (index) {
+                  _deleteImage(_excludedItems[index]);
+                  if (mounted) setState(() => _selectedIndex = null);
+                },
+                onMove: (index) {
+                  _moveImage(_excludedItems[index]);
+                  if (mounted) setState(() => _selectedIndex = null);
+                },
+                onCopy: (index) {
+                  _copyImage(_excludedItems[index]);
+                },
+                primaryIcon: Icons.restore,
+                primaryColor: Colors.orange,
+                primaryTooltip: loc.restore,
               ),
-            )
-          : MasonryImageGrid(
-              items: _excludedItems,
-              selectedIndex: _selectedIndex,
-              onTap: (index) {
-                setState(() {
-                  _selectedIndex = _selectedIndex == index ? null : index;
-                });
-              },
-              onPrimaryAction: (index) {
-                _restoreImage(_excludedItems[index].path);
-                if (mounted) setState(() => _selectedIndex = null);
-              },
-              onDelete: (index) {
-                _deleteImage(_excludedItems[index]);
-                if (mounted) setState(() => _selectedIndex = null);
-              },
-              onMove: (index) {
-                _moveImage(_excludedItems[index]);
-                if (mounted) setState(() => _selectedIndex = null);
-              },
-              onCopy: (index) {
-                _copyImage(_excludedItems[index]);
-              },
-              primaryIcon: Icons.restore,
-              primaryColor: Colors.orange,
-              primaryTooltip: loc.restore,
-            ),
+      ),
     );
   }
 }

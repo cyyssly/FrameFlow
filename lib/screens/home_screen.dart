@@ -1,11 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:slide_show/models/image_item.dart';
 import 'package:slide_show/providers/slide_provider.dart';
 import 'package:slide_show/providers/settings_provider.dart';
 import 'package:slide_show/screens/folder_selection_screen.dart';
+import 'package:slide_show/screens/help_screen.dart';
 import 'package:slide_show/services/media_store_service.dart';
 import 'package:slide_show/l10n/app_localizations.dart';
 
@@ -306,13 +306,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _openDonatePage() async {
-    final uri = Uri.parse('https://ifdian.net/a/sly345678/plan');
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
   void _selectFolder(BuildContext context) {
     Navigator.push(
       context,
@@ -471,7 +464,7 @@ class _HomeScreenState extends State<HomeScreen> {
               SizedBox(
                 width: MediaQuery.of(context).size.width * 0.5,
                 child: ElevatedButton(
-                  onPressed: _openDonatePage,
+                  onPressed: () => Navigator.pushNamed(context, '/help'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFe17055),
                     foregroundColor: Colors.white,
@@ -488,10 +481,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.favorite, size: 24),
+                      const Icon(Icons.help_outline, size: 24),
                       const SizedBox(width: 12),
                       Text(
-                        AppLocalizations.of(context).sponsor,
+                        AppLocalizations.of(context).help,
                         style: const TextStyle(fontSize: 18),
                       ),
                     ],
@@ -500,7 +493,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                'V1.3.2',
+                appVersionLabel,
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withValues(alpha: 0.3),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:slide_show/screens/home_screen.dart';
+import 'package:slide_show/screens/help_screen.dart';
 import 'package:slide_show/screens/player_screen.dart';
 import 'package:slide_show/screens/settings_screen.dart';
 import 'package:slide_show/providers/slide_provider.dart';
@@ -72,6 +73,7 @@ class MyApp extends StatelessWidget {
         '/': (context) => const HomeScreen(),
         '/player': (context) => const PlayerScreen(),
         '/settings': (context) => const SettingsScreen(),
+        '/help': (context) => const HelpScreen(),
       },
     );
   }
