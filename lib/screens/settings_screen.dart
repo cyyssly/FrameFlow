@@ -788,7 +788,7 @@ class SettingsScreen extends StatelessWidget {
       ('↓', l10n.zoomOut),
       ('R', l10n.rotateRight),
       ('L', l10n.rotateLeft),
-      ('ESC', l10n.exitFullscreen),
+      ('ESC', l10n.exitPlayback),
       ('F11', l10n.toggleFullscreen),
       ('Del', l10n.deleteImage),
     ];

@@ -429,7 +429,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
     }
   }
 
-  void _clearAll() {
+  /// 全部排除：把已选文件夹全部移出播放列表
+  void _excludeAll() {
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
     final settingsProvider = Provider.of<SettingsProvider>(
       context,
@@ -905,7 +906,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                     child: ElevatedButton(
                       onPressed: slideProvider.folderPaths.isEmpty
                           ? null
-                          : _clearAll,
+                          : _excludeAll,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFd63031),
                         foregroundColor: Colors.white,
@@ -921,10 +922,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.clear, size: 24),
+                          const Icon(Icons.block, size: 24),
                           const SizedBox(width: 12),
                           Text(
-                            AppLocalizations.of(context).clearAll,
+                            AppLocalizations.of(context).excludeAll,
                             style: const TextStyle(fontSize: 18),
                           ),
                         ],
