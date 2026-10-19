@@ -10,6 +10,8 @@
 # Release distribution artifacts
 /release/
 *.bak
+# Local keystore backups (never commit signing material)
+/keystore_backup/
 .DS_Store
 .atom/
 .build/

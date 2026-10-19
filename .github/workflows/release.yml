@@ -1,0 +1,183 @@
+name: Build & Release
+
+# 使用方式：
+#   - 推送 v* 标签  ->  构建 Windows x64 / Android 签名包，并自动创建 GitHub Release 上传产物
+#   - 手动触发(workflow_dispatch)  ->  只构建并上传为 Actions artifacts，不创建 Release（用于验证凭据/试跑）
+#
+# 依赖的仓库 Secrets（Settings > Secrets and variables > Actions）：
+#   KEYSTORE_BASE64  Android 签名密钥库 upload-keystore.jks 的 Base64 编码
+#   STORE_PASSWORD   keystore 的 store password
+#   KEY_PASSWORD     keystore 中 key(upload) 的 password
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.44.8'
+
+jobs:
+  # 质量门禁：静态分析与单元测试
+  verify:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  # 解析版本号，并确保标签与 pubspec.yaml 一致
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from pubspec.yaml
+        id: read
+        run: |
+          VERSION=$(grep -m1 '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*//; s/\+.*$//')
+          if [ -z "$VERSION" ]; then
+            echo "::error::Cannot read version from pubspec.yaml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Tag must match pubspec version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "v${{ steps.read.outputs.version }}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match pubspec version v${{ steps.read.outputs.version }}"
+            exit 1
+          fi
+
+  android:
+    name: Android APK
+    needs: [verify, version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Restore signing keystore from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          {
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=upload"
+            echo "storeFile=upload-keystore.jks"
+          } > android/key.properties
+
+      - name: Verify keystore opens with the secrets
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          keytool -list -alias upload -keystore android/app/upload-keystore.jks \
+            -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD"
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build signed release APK
+        run: flutter build apk --release
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             "dist/FrameFlow-v${{ needs.version.outputs.version }}-android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    needs: [verify, version]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release
+        run: flutter build windows --release
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' `
+            -DestinationPath "dist/FrameFlow-v${{ needs.version.outputs.version }}-windows-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # 仅在推送标签时发布；手动触发不会创建 Release
+  release:
+    name: Publish GitHub Release
+    needs: [android, windows]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -l dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
