@@ -1,4 +1,4 @@
-package com.example.slide_show
+package cyyssly.frame_flow
 
 import android.Manifest
 import android.app.Activity
@@ -22,7 +22,7 @@ import java.io.IOException
 import java.util.Locale
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.example.slide_show/media_store"
+    private val CHANNEL = "cyyssly.frame_flow/media_store"
     private var pendingResult: MethodChannel.Result? = null
     private var pendingTrashResult: MethodChannel.Result? = null
 

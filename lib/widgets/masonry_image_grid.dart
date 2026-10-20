@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/rendering.dart'
     show SliverGridLayout, SliverGridGeometry, SliverConstraints;
-import 'package:slide_show/models/image_item.dart';
-import 'package:slide_show/l10n/app_localizations.dart';
+import 'package:frame_flow/models/image_item.dart';
+import 'package:frame_flow/l10n/app_localizations.dart';
 
 /// 瀑布流网格组件：固定列宽，高度按图片宽高比自适应
 class MasonryImageGrid extends StatelessWidget {

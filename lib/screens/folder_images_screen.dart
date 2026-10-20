@@ -3,14 +3,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:slide_show/models/image_item.dart';
-import 'package:slide_show/providers/settings_provider.dart';
-import 'package:slide_show/providers/slide_provider.dart';
-import 'package:slide_show/services/fullscreen_service.dart';
-import 'package:slide_show/services/image_scan_service.dart';
-import 'package:slide_show/services/media_store_service.dart';
-import 'package:slide_show/widgets/masonry_image_grid.dart';
-import 'package:slide_show/l10n/app_localizations.dart';
+import 'package:frame_flow/models/image_item.dart';
+import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/providers/slide_provider.dart';
+import 'package:frame_flow/services/fullscreen_service.dart';
+import 'package:frame_flow/services/image_scan_service.dart';
+import 'package:frame_flow/services/media_store_service.dart';
+import 'package:frame_flow/screens/player_screen.dart';
+import 'package:frame_flow/widgets/masonry_image_grid.dart';
+import 'package:frame_flow/l10n/app_localizations.dart';
 
 /// 瀑布流排序方式
 enum _SortMode { byName, byTime, random }
@@ -72,18 +73,22 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     super.dispose();
   }
 
-  /// 键盘快捷键：F11 切换全屏
+  /// 键盘快捷键：F11 切换全屏，ESC 返回文件夹列表
   ///
   /// [HardwareKeyboard] 会无条件调用所有已注册的 handler，而播放页也注册了
-  /// F11，因此这里必须确认本页位于最上层，否则同一次按键会被两页各处理一次
-  /// （先进全屏再退全屏，等于没反应）。
-  /// 全屏切换只由 F11 负责，ESC 不再具备退出全屏功能。
+  /// F11/ESC，因此这里必须确认本页位于最上层，否则同一次按键会被两页各处理一次
+  /// （先进全屏再退全屏，等于没反应；ESC 则会连着返回两层）。
+  /// 全屏切换只由 F11 负责，ESC 只负责返回上一页，退全屏交给 PopScope 处理。
   bool _hardwareKeyHandler(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (ModalRoute.of(context)?.isCurrent != true) return false;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.f11) {
       _toggleFullscreen();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.escape) {
+      Navigator.of(context).maybePop();
       return true;
     }
     return false;
@@ -363,7 +368,7 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     slideProvider.startPlay();
 
     setState(() => _selectedIndex = null);
-    Navigator.pushNamed(context, '/player');
+    openPlayerScreen(context);
   }
 
   void _showSnack(String msg) {

@@ -1,13 +1,14 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:slide_show/models/image_item.dart';
-import 'package:slide_show/providers/slide_provider.dart';
-import 'package:slide_show/providers/settings_provider.dart';
-import 'package:slide_show/screens/folder_selection_screen.dart';
-import 'package:slide_show/screens/help_screen.dart';
-import 'package:slide_show/services/media_store_service.dart';
-import 'package:slide_show/l10n/app_localizations.dart';
+import 'package:frame_flow/models/image_item.dart';
+import 'package:frame_flow/providers/slide_provider.dart';
+import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/screens/folder_selection_screen.dart';
+import 'package:frame_flow/screens/help_screen.dart';
+import 'package:frame_flow/screens/player_screen.dart';
+import 'package:frame_flow/services/media_store_service.dart';
+import 'package:frame_flow/l10n/app_localizations.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -123,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
           slideProvider.goToStartPosition(settingsProvider.playOrder);
           slideProvider.startPlay();
           if (mounted) {
-            Navigator.pushNamed(context, '/player');
+            openPlayerScreen(context);
           }
         }
       }
@@ -159,7 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
     slideProvider.goToStartPosition(settingsProvider.playOrder);
     slideProvider.startPlay();
     if (mounted) {
-      Navigator.pushNamed(context, '/player');
+      openPlayerScreen(context);
     }
   }
 
@@ -285,7 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
       slideProvider.goToStartPosition(settingsProvider.playOrder);
       slideProvider.startPlay();
       if (mounted) {
-        Navigator.pushNamed(context, '/player');
+        openPlayerScreen(context);
       }
     } catch (e) {
       debugPrint('扫描图片失败: $e');

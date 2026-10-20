@@ -7,11 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:image/image.dart' as img;
-import 'package:slide_show/providers/slide_provider.dart';
-import 'package:slide_show/providers/settings_provider.dart';
-import 'package:slide_show/l10n/app_localizations.dart';
-import 'package:slide_show/services/fullscreen_service.dart';
-import 'package:slide_show/utils/rotated_fit.dart';
+import 'package:frame_flow/providers/slide_provider.dart';
+import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/l10n/app_localizations.dart';
+import 'package:frame_flow/services/fullscreen_service.dart';
+import 'package:frame_flow/utils/rotated_fit.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -28,6 +28,24 @@ Size? _decodeImageSize(Uint8List bytes) {
   }
 }
 
+/// 打开播放页的统一入口。
+///
+/// 若开启了「启动即全屏」，先在调用方页面（此时仍是稳定的文件夹列表 / 主界面）
+/// 把窗口切到全屏，再 push 播放页。这样窗口样式变更不会与路由入场动画同时发生
+/// （在动画过程中改窗口边框/尺寸会弄坏 Flutter 的渲染表面），并且整个入场动画
+/// 都在全屏尺寸下进行，不会出现「先窗口化显示、再跳到全屏」的分步观感。
+///
+/// 手机端应用本身即独占全屏，该设置只对桌面端生效。
+Future<void> openPlayerScreen(BuildContext context) {
+  final settings = Provider.of<SettingsProvider>(context, listen: false);
+  final startFullscreen =
+      settings.startFullscreen && !Platform.isAndroid && !Platform.isIOS;
+  if (startFullscreen) {
+    FullscreenService.instance.enter();
+  }
+  return Navigator.pushNamed(context, '/player');
+}
+
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key});
 
@@ -39,8 +57,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _autoPlayTimer;
   bool _showControls = true;
   Timer? _hideControlsTimer;
-  bool _showInfo = true;
-  Timer? _hideInfoTimer;
 
   /// 缩放/平移手势进行中。
   ///
@@ -165,8 +181,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   ImageOrientation _lastOrientation = ImageOrientation.followSystem;
   int _lastControlsHideDelay = -1;
   bool _lastHideToolbar = true;
-  int _lastInfoHideDelay = -1;
-  bool _lastInfoAutoHide = true;
 
   @override
   void initState() {
@@ -182,8 +196,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _lastOrientation = settings.imageOrientation;
     _lastControlsHideDelay = settings.controlsHideDelay;
     _lastHideToolbar = settings.hideToolbar;
-    _lastInfoHideDelay = settings.infoHideDelay;
-    _lastInfoAutoHide = settings.infoAutoHide;
 
     // 注册全局键盘监听器，不依赖 FocusNode
     HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
@@ -191,25 +203,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 请求焦点以接收键盘事件
 
-      // 如果设置了自动全屏，先进入全屏再开始播放。
-      // 手机端应用本身就是独占全屏的，不存在窗口化的「全屏」概念，
-      // 因此该设置只对桌面端生效（设置页在手机端也不展示这一项）。
-      final startFullscreen =
-          settings.startFullscreen && !Platform.isAndroid && !Platform.isIOS;
-      if (startFullscreen) {
-        // 延迟更长时间再进入全屏，确保窗口完全就绪
-        Future.delayed(const Duration(milliseconds: 300), () {
-          _enterFullscreen();
-
-          // 全屏后再延迟一小段时间启动自动播放，确保窗口状态稳定
-          Future.delayed(const Duration(milliseconds: 100), () {
-            if (slideProvider.isPlaying && slideProvider.images.isNotEmpty) {
-              _startAutoPlay();
-            }
-          });
-        });
-      } else if (slideProvider.isPlaying && slideProvider.images.isNotEmpty) {
-        // 如果正处于播放状态，启动自动播放定时器
+      // 全屏已由 [openPlayerScreen] 在 push 本页之前完成（见该函数的说明），
+      // 这里只需按当前播放状态启动自动播放定时器。
+      if (slideProvider.isPlaying && slideProvider.images.isNotEmpty) {
         _startAutoPlay();
       }
 
@@ -218,7 +214,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       // 在播放状态确定后再设置自动隐藏
       _hideControlsDelayed();
-      _hideInfoDelayed();
     });
   }
 
@@ -236,21 +231,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final controlsChanged =
         settings.controlsHideDelay != _lastControlsHideDelay ||
         settings.hideToolbar != _lastHideToolbar;
-    final infoChanged =
-        settings.infoHideDelay != _lastInfoHideDelay ||
-        settings.infoAutoHide != _lastInfoAutoHide;
 
     _lastInterval = settings.interval;
     _lastOrientation = settings.imageOrientation;
     _lastControlsHideDelay = settings.controlsHideDelay;
     _lastHideToolbar = settings.hideToolbar;
-    _lastInfoHideDelay = settings.infoHideDelay;
-    _lastInfoAutoHide = settings.infoAutoHide;
 
-    if (!intervalChanged &&
-        !orientationChanged &&
-        !controlsChanged &&
-        !infoChanged) {
+    if (!intervalChanged && !orientationChanged && !controlsChanged) {
       return;
     }
 
@@ -266,9 +253,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (controlsChanged) {
         _hideControlsDelayed();
       }
-      if (infoChanged) {
-        _hideInfoDelayed();
-      }
     });
   }
 
@@ -276,7 +260,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _autoPlayTimer?.cancel();
     _hideControlsTimer?.cancel();
-    _hideInfoTimer?.cancel();
     // 释放用于读取图片尺寸的图片流监听
     _detachIntrinsicSizeListener();
     // 移除全局键盘监听器
@@ -623,26 +606,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  void _hideInfoDelayed() {
-    final settings = Provider.of<SettingsProvider>(context, listen: false);
-    _hideInfoTimer?.cancel();
-    if (settings.infoAutoHide) {
-      _hideInfoTimer = Timer(
-        Duration(seconds: settings.infoHideDelay),
-        _hideInfoIfIdle,
-      );
-    }
-  }
-
-  /// 同 [_hideControlsIfIdle]：手势进行中不隐藏信息栏，
-  /// 避免长按拖动时触发额外重建。
-  void _hideInfoIfIdle() {
-    if (!mounted || _isGestureActive || _pointerCount > 0) return;
-    setState(() {
-      _showInfo = false;
-    });
-  }
-
   /// 手指抬起：全部松开时结束手势状态。
   ///
   /// 若本次只是“轻点”（没有位移、没有捏合、也没触发切图），
@@ -696,11 +659,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (isSingleTap) {
       // 落在工具栏上的轻点属于“点按钮”，交给按钮自己的 onPressed 处理：
       // 只顺延自动隐藏计时，既不隐藏工具栏，也不取消自动播放计时器。
-      // 注意不能用 _showControlsTemporarily()：那会把 _showInfo 也置为 true，
-      // 让“点按钮”意外带出图片信息栏。
+      // 注意不能用 _showControlsTemporarily()：那会让“点按钮”意外重启整轮显隐计时，
+      // 且点按钮本身只应顺延当前计时。
       if (downPosition != null && _isPointOnToolbar(downPosition)) {
         _hideControlsDelayed();
-        _hideInfoDelayed();
         return;
       }
       // 轻点画面 → 切换工具栏显隐（显示中则立即关闭，已关闭则显示）
@@ -708,7 +670,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       // 缩放/拖动结束 → 重新开始自动隐藏计时
       _hideControlsDelayed();
-      _hideInfoDelayed();
     }
   }
 
@@ -719,7 +680,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// 隐藏动作受 [_hideControlsIfIdle] 保护，手指按住期间不会生效。
   void _deferControlHide() {
     _hideControlsDelayed();
-    _hideInfoDelayed();
+  }
+
+  /// 鼠标在画面上移动也算一次“操作”。
+  ///
+  /// 此前自动隐藏计时只在点按 / 松手 / 点按钮等事件后重启，鼠标移动不会刷新它，
+  /// 于是“手一直在动、工具栏却照样到点隐藏”。这里把移动也视为操作：
+  /// 工具栏仍显示时顺延计时；已隐藏时先把光标与工具栏重新显示出来。
+  ///
+  /// 悬浮事件触发极其频繁，因此仅在可见性需要变化时才走会 setState 的
+  /// [_showControlsTemporarily]，其余情况只重启计时器，避免整页反复重建。
+  void _handlePointerHover(PointerHoverEvent event) {
+    if (event.kind != PointerDeviceKind.mouse) return;
+    // 手势进行中（按下拖动 / 捏合）交给原有逻辑处理，避免交叉
+    if (_isGestureActive || _pointerCount > 0) return;
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    // 未开启自动隐藏工具栏时，工具栏本就常显，无需处理
+    if (!settings.hideToolbar) return;
+    if (!_showControls) {
+      _showControlsTemporarily();
+    } else {
+      _deferControlHide();
+    }
   }
 
   /// 只在手势确实已经结束（没有任何指针按下）时才隐藏工具栏。
@@ -736,17 +718,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  /// 显示工具栏与信息栏，并在超时后自动隐藏。
+  /// 显示工具栏（含图片信息栏），并在超时后自动隐藏。
   ///
-  /// 仅由真正的“点击”触发；按下瞬间不再弹出，避免缩放时工具栏闪现。
+  /// 由真正的“点击”（松手时判定为轻点）触发；工具栏已隐藏时鼠标移动
+  /// （见 [_handlePointerHover]）也会触发。按下瞬间不再弹出，
+  /// 避免缩放时工具栏闪现。
   void _showControlsTemporarily() {
     if (!mounted) return;
     setState(() {
       _showControls = true;
-      _showInfo = true;
     });
     _hideControlsDelayed();
-    _hideInfoDelayed();
   }
 
   /// 轻点屏幕切换工具栏显隐。
@@ -761,10 +743,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     if (_showControls && settings.hideToolbar) {
       _hideControlsTimer?.cancel();
-      _hideInfoTimer?.cancel();
       setState(() {
         _showControls = false;
-        _showInfo = false;
       });
       return;
     }
@@ -813,7 +793,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     // 重启自动隐藏定时器
     _hideControlsDelayed();
-    _hideInfoDelayed();
   }
 
   // ==================== 缩放与平移 ====================
@@ -1188,7 +1167,52 @@ class _PlayerScreenState extends State<PlayerScreen> {
       slideProvider.stopPlay();
     }
     // 返回主界面
-    Navigator.pop(context);
+    _popWithFullscreenRestore();
+  }
+
+  /// 退出播放页返回上一级，并保证全屏窗口已恢复。
+  ///
+  /// 顺序必须是「先恢复窗口、再 pop」：反过来的话，pop 动画与主界面会按旧的
+  /// 全屏尺寸布局，出现主界面错位、按钮点不动。左上角返回按钮与本方法共用。
+  void _popWithFullscreenRestore() {
+    if (!_isFullscreen) {
+      Navigator.pop(context);
+      return;
+    }
+    final sizeBefore = MediaQuery.sizeOf(context);
+    final watch = Stopwatch()..start();
+    _exitFullscreen();
+    final navigator = Navigator.of(context);
+    _runAfterResize(
+      () => navigator.pop(),
+      sizeBefore: sizeBefore,
+      watch: watch,
+    );
+  }
+
+  /// 等待视图尺寸生效的最长时间。超过它就直接执行后续动作，
+  /// 与原先「固定等 200ms」的可用行为等价，避免尺寸异常时卡住不返回。
+  static const _maxResizeWait = Duration(milliseconds: 200);
+
+  /// 等 Flutter 的视图尺寸真正变化后再执行 [action]（逐帧检测，带时间兜底）。
+  ///
+  /// 不用固定延时：太长（原先 200ms）会让人明显看到「窗口先恢复、页面再切换」
+  /// 的两步跳变；太短又可能在尺寸尚未生效时就切换，重新引发布局错位。
+  /// 逐帧检测通常 1~2 帧（16~32ms）即可通过，肉眼几乎无感。
+  void _runAfterResize(
+    VoidCallback action, {
+    required Size sizeBefore,
+    required Stopwatch watch,
+  }) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (MediaQuery.sizeOf(context) != sizeBefore ||
+          watch.elapsed >= _maxResizeWait) {
+        action();
+        return;
+      }
+      _runAfterResize(action, sizeBefore: sizeBefore, watch: watch);
+    });
   }
 
   bool _hardwareKeyHandler(KeyEvent event) {
@@ -1231,8 +1255,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _zoomAt(_viewportCenter, 1 / _zoomStep);
           return true;
         case LogicalKeyboardKey.escape:
-          // ESC 一次直接退出播放；全屏状态在页面销毁时一并恢复，
-          // 全屏切换统一交给 F11（ESC 不再负责退出全屏）
+          // ESC 一次直接退出播放；退出时若处于全屏，走统一的
+          // 「先恢复窗口、稳定后再返回」路径（全屏切换仍交给 F11）
           _exitPlayback();
           return true;
         case LogicalKeyboardKey.f11:
@@ -1565,6 +1589,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             autofocus: true,
             child: Listener(
               onPointerSignal: _handleScroll,
+              // 鼠标移动同样算“操作”：用于顺延/恢复工具栏的自动隐藏（见
+              // _handlePointerHover）。触屏没有 hover 事件，不受影响。
+              onPointerHover: _handlePointerHover,
               // 用于“完全松手”才恢复工具栏：GestureDetector 的 onScaleEnd
               // 无法覆盖“双指后先抬一根手指、另一根继续停住”的情形。
               onPointerDown: (event) {
@@ -1687,22 +1714,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 message: AppLocalizations.of(context).back,
                                 child: IconButton(
                                   icon: const Icon(Icons.arrow_back),
-                                  onPressed: () {
-                                    // 如果当前是全屏状态，先退出全屏再返回
-                                    if (_isFullscreen) {
-                                      _exitFullscreen();
-                                      final navigator = Navigator.of(context);
-                                      // 延迟一小段时间让窗口状态稳定后再返回
-                                      Future.delayed(
-                                        const Duration(milliseconds: 200),
-                                        () {
-                                          if (mounted) navigator.pop();
-                                        },
-                                      );
-                                    } else {
-                                      Navigator.pop(context);
-                                    }
-                                  },
+                                  onPressed: _popWithFullscreenRestore,
                                 ),
                               ),
                               actions: [
@@ -1785,7 +1797,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               padding: const EdgeInsets.all(16),
                               child: Column(
                                 children: [
-                                  if (settings.showImageInfo && _showInfo)
+                                  if (settings.showImageInfo)
                                     Padding(
                                       padding: const EdgeInsets.only(
                                         bottom: 12,

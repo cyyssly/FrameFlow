@@ -62,10 +62,8 @@ class SettingsProvider extends ChangeNotifier {
   String? _lastFolderPath;
   List<String> _lastFolderPaths = [];
 
-  // 信息显示设置
+  // 信息显示设置（自动隐藏由工具栏的自动隐藏设置统一控制）
   bool _showImageInfo = false;
-  bool _infoAutoHide = true;
-  int _infoHideDelay = 3;
 
   // 快捷键与控制
   bool _wheelSwitchImage = true;
@@ -110,8 +108,6 @@ class SettingsProvider extends ChangeNotifier {
   List<String> get lastFolderPaths => _lastFolderPaths;
 
   bool get showImageInfo => _showImageInfo;
-  bool get infoAutoHide => _infoAutoHide;
-  int get infoHideDelay => _infoHideDelay;
   bool get wheelSwitchImage => _wheelSwitchImage;
   DeleteAction get deleteAction => _deleteAction;
   int get languageIndex => _languageIndex;
@@ -225,18 +221,6 @@ class SettingsProvider extends ChangeNotifier {
     _saveSettings();
   }
 
-  void setInfoAutoHide(bool value) {
-    _infoAutoHide = value;
-    notifyListeners();
-    _saveSettings();
-  }
-
-  void setInfoHideDelay(int value) {
-    _infoHideDelay = value;
-    notifyListeners();
-    _saveSettings();
-  }
-
   void setWheelSwitchImage(bool value) {
     _wheelSwitchImage = value;
     notifyListeners();
@@ -336,8 +320,6 @@ class SettingsProvider extends ChangeNotifier {
       _lastFolderPaths = json.decode(lastFolderPathsStr).cast<String>();
     }
     _showImageInfo = prefs.getBool('showImageInfo') ?? false;
-    _infoAutoHide = prefs.getBool('infoAutoHide') ?? true;
-    _infoHideDelay = prefs.getInt('infoHideDelay') ?? 3;
 
     final excludedStr = prefs.getString('excludedPaths');
     if (excludedStr != null) {
@@ -379,8 +361,6 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.setInt('languageIndex', _languageIndex);
     await prefs.setInt('customInterval', _customInterval);
     await prefs.setBool('useCustomInterval', _useCustomInterval);
-    await prefs.setBool('infoAutoHide', _infoAutoHide);
-    await prefs.setInt('infoHideDelay', _infoHideDelay);
     await prefs.setBool('wheelSwitchImage', _wheelSwitchImage);
     await prefs.setString('excludedPaths', json.encode(_excludedPaths));
     await prefs.setInt('imageOrientation', _imageOrientation.index);

@@ -1,5 +1,5 @@
 ;SFX ×¢ÊÍ
-Setup=slide_show.exe
+Setup=FrameFlow.exe
 TempMode
 Silent=1
 Overwrite=1

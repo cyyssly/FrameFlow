@@ -1,14 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
-import 'package:slide_show/screens/home_screen.dart';
-import 'package:slide_show/screens/help_screen.dart';
-import 'package:slide_show/screens/player_screen.dart';
-import 'package:slide_show/screens/settings_screen.dart';
-import 'package:slide_show/providers/slide_provider.dart';
-import 'package:slide_show/providers/settings_provider.dart';
-import 'package:slide_show/l10n/app_localizations.dart';
+import 'package:frame_flow/screens/home_screen.dart';
+import 'package:frame_flow/screens/help_screen.dart';
+import 'package:frame_flow/screens/player_screen.dart';
+import 'package:frame_flow/screens/settings_screen.dart';
+import 'package:frame_flow/providers/slide_provider.dart';
+import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/l10n/app_localizations.dart';
 import 'dart:io';
+
+/// 全局路由观察者。
+///
+/// 页面可订阅它，在「重新进入」（从子页面返回）时刷新数据。
+/// 例如文件夹列表页需要重新统计已选文件夹与已排除文件的数量。
+/// 必须注册到 [MaterialApp.navigatorObservers] 才能收到路由事件。
+final RouteObserver<ModalRoute<void>> appRouteObserver =
+    RouteObserver<ModalRoute<void>>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -68,6 +76,7 @@ class MyApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF1a1a2e),
         fontFamily: 'NotoSansSC',
       ),
+      navigatorObservers: [appRouteObserver],
       initialRoute: '/',
       routes: {
         '/': (context) => const HomeScreen(),

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
-import 'package:slide_show/l10n/app_localizations.dart';
-import 'package:slide_show/providers/settings_provider.dart';
-import 'package:slide_show/screens/settings_screen.dart';
+import 'package:frame_flow/l10n/app_localizations.dart';
+import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/screens/settings_screen.dart';
 
 void main() {
   /// 以指定窗口宽度渲染设置页。
@@ -83,7 +83,6 @@ void main() {
       l10n.transitionAnimation,
       l10n.windowFullscreen,
       l10n.filesAndDirs,
-      l10n.infoDisplay,
       l10n.controlsLabel,
     ]) {
       expect(find.text(title), findsWidgets, reason: '缺少分组标题：$title');
@@ -117,14 +116,19 @@ void main() {
     }
 
     // 左栏（第 1 栏）应包含这些分组。
-    for (final title in ['languageLabel', 'imageDisplay', 'windowFullscreen']) {
+    for (final title in [
+      'languageLabel',
+      'imageDisplay',
+      'windowFullscreen',
+      'filesAndDirs',
+    ]) {
       expectOnlyIn(left, right, _titleOf(l10n, title));
     }
     // 右栏（第 2 栏）应包含这些分组。
     for (final title in [
       'playSettings',
       'transitionAnimation',
-      'infoDisplay',
+      'controlsLabel',
     ]) {
       expectOnlyIn(right, left, _titleOf(l10n, title));
     }
@@ -150,8 +154,10 @@ String _titleOf(AppLocalizations l10n, String name) {
       return l10n.transitionAnimation;
     case 'windowFullscreen':
       return l10n.windowFullscreen;
-    case 'infoDisplay':
-      return l10n.infoDisplay;
+    case 'filesAndDirs':
+      return l10n.filesAndDirs;
+    case 'controlsLabel':
+      return l10n.controlsLabel;
     default:
       throw ArgumentError('未知分组：$name');
   }

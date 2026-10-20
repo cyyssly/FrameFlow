@@ -2,10 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:slide_show/l10n/app_localizations.dart';
+import 'package:frame_flow/l10n/app_localizations.dart';
 
 /// 展示用版本号（与 pubspec.yaml 的 version 保持一致，改版本时需同步）
-const String appVersionLabel = 'V1.3.3';
+const String appVersionLabel = 'V1.3.4';
 
 /// 帮助页：说明文档 / 关于 / 赞助
 ///
@@ -122,6 +122,20 @@ class _HelpScreenState extends State<HelpScreen> {
     _bullet(loc.helpLoopAuto),
     _bullet(loc.helpInterval),
     _bullet(loc.helpPauseZoom),
+    // 内置快捷键说明紧跟在播放控制之后；全部是键盘按键，手机端不展示
+    if (!HelpScreen._isMobile) ...[
+      _groupTitle(loc.shortcutTitle),
+      _bullet(loc.shortcutItem(loc.spaceKey, loc.playPause)),
+      _bullet(loc.shortcutItem('←', loc.previous)),
+      _bullet(loc.shortcutItem('→', loc.next)),
+      _bullet(loc.shortcutItem('↑', loc.zoomIn)),
+      _bullet(loc.shortcutItem('↓', loc.zoomOut)),
+      _bullet(loc.shortcutItem('R', loc.rotateRight)),
+      _bullet(loc.shortcutItem('L', loc.rotateLeft)),
+      _bullet(loc.shortcutItem('ESC', loc.exitPlayback)),
+      _bullet(loc.shortcutItem('F11', loc.toggleFullscreen)),
+      _bullet(loc.shortcutItem('Del', loc.deleteImage)),
+    ],
     _groupTitle(loc.helpGroupDisplay),
     _bullet(loc.helpFitMode),
     _bullet(loc.helpBackground),

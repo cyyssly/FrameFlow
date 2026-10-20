@@ -48,31 +48,71 @@ class FullscreenService {
     _isFullscreen = false;
   }
 
-  /// 取前台窗口句柄；取不到时按窗口标题查找，仍取不到则返回 0
-  int _foregroundWindow(DynamicLibrary user32) {
+  /// 本应用窗口的类名（Flutter Windows runner 模板注册的窗口类，见
+  /// windows/runner/win32_window.cpp 的 kWindowClassName）与窗口标题。
+  static const _windowClassName = 'FLUTTER_RUNNER_WIN32_WINDOW';
+  static const _windowTitle = 'FrameFlow';
+
+  /// 判断窗口句柄是否属于当前进程。
+  ///
+  /// 窗口类名 / 标题可能被其它用同一套 Flutter 模板构建的程序共用，
+  /// 因此找到句柄后还要用进程号确认确实是「自己」的窗口。
+  bool _isOwnWindow(DynamicLibrary user32, int hwnd) {
+    final getWindowThreadProcessId = user32
+        .lookupFunction<
+          Uint32 Function(IntPtr, Pointer<Uint32>),
+          int Function(int, Pointer<Uint32>)
+        >('GetWindowThreadProcessId');
+    final pidPtr = calloc<Uint32>();
+    try {
+      getWindowThreadProcessId(hwnd, pidPtr);
+      return pidPtr.value == pid;
+    } finally {
+      calloc.free(pidPtr);
+    }
+  }
+
+  /// 取本应用主窗口的句柄；取不到时返回 0。
+  ///
+  /// 这里刻意不以 [GetForegroundWindow] 为主依据：它返回的是**调用瞬间**
+  /// 处于前台的窗口，而热重启是用户在终端里按 R 触发的，那一刻前台窗口
+  /// 正是终端，于是会把终端整窗全屏掉（严重错误）。
+  /// 因此优先按窗口类名 / 标题查找本应用窗口，并用进程号确认归属；
+  /// 前两者都找不到时，才退回到「前台窗口且属于本进程」。
+  int _appWindow(DynamicLibrary user32) {
+    final findWindowW = user32
+        .lookupFunction<
+          IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
+          int Function(Pointer<Utf16>, Pointer<Utf16>)
+        >('FindWindowW');
     final getForegroundWindow = user32
         .lookupFunction<IntPtr Function(), int Function()>(
           'GetForegroundWindow',
         );
-    var hwnd = getForegroundWindow();
 
-    // 如果获取不到前台窗口，尝试通过窗口标题查找
-    if (hwnd == 0) {
-      final findWindowW = user32
-          .lookupFunction<
-            IntPtr Function(Pointer<Utf16>, Pointer<Utf16>),
-            int Function(Pointer<Utf16>, Pointer<Utf16>)
-          >('FindWindowW');
-      hwnd = findWindowW(nullptr, 'FrameFlow'.toNativeUtf16());
+    final className = _windowClassName.toNativeUtf16();
+    final title = _windowTitle.toNativeUtf16();
+    try {
+      final candidates = <int>[
+        findWindowW(className, nullptr),
+        findWindowW(nullptr, title),
+        getForegroundWindow(),
+      ];
+      for (final hwnd in candidates) {
+        if (hwnd != 0 && _isOwnWindow(user32, hwnd)) return hwnd;
+      }
+      return 0;
+    } finally {
+      malloc.free(className);
+      malloc.free(title);
     }
-    return hwnd;
   }
 
   /// 去掉窗口边框与标题栏并铺满屏幕；取不到窗口句柄时返回 false
   bool _enterWindowsFullscreen() {
     try {
       final user32 = DynamicLibrary.open('user32.dll');
-      final hwnd = _foregroundWindow(user32);
+      final hwnd = _appWindow(user32);
       if (hwnd == 0) return false;
 
       // 先激活窗口，确保获取的是正确的窗口句柄
@@ -146,7 +186,7 @@ class FullscreenService {
     if (_originalStyle == null) return;
     try {
       final user32 = DynamicLibrary.open('user32.dll');
-      final hwnd = _foregroundWindow(user32);
+      final hwnd = _appWindow(user32);
       if (hwnd == 0) return;
 
       // 恢复原始窗口样式

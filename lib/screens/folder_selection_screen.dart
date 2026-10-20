@@ -1,15 +1,17 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:slide_show/providers/slide_provider.dart';
-import 'package:slide_show/providers/settings_provider.dart';
-import 'package:slide_show/models/image_item.dart';
-import 'package:slide_show/screens/excluded_images_screen.dart';
-import 'package:slide_show/screens/folder_images_screen.dart';
-import 'package:slide_show/services/directory_picker_service.dart';
-import 'package:slide_show/services/media_store_service.dart';
-import 'package:slide_show/l10n/app_localizations.dart';
+import 'package:frame_flow/main.dart';
+import 'package:frame_flow/providers/slide_provider.dart';
+import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/models/image_item.dart';
+import 'package:frame_flow/screens/excluded_images_screen.dart';
+import 'package:frame_flow/screens/folder_images_screen.dart';
+import 'package:frame_flow/screens/player_screen.dart';
+import 'package:frame_flow/services/directory_picker_service.dart';
+import 'package:frame_flow/services/media_store_service.dart';
+import 'package:frame_flow/l10n/app_localizations.dart';
 
 class FolderSelectionScreen extends StatefulWidget {
   const FolderSelectionScreen({super.key});
@@ -18,13 +20,21 @@ class FolderSelectionScreen extends StatefulWidget {
   State<FolderSelectionScreen> createState() => _FolderSelectionScreenState();
 }
 
-class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
+class _FolderSelectionScreenState extends State<FolderSelectionScreen>
+    with RouteAware {
   bool _isScanning = false;
 
   // 缓存每个文件夹的统计信息
   final Map<String, Map<String, int>> _folderStats = {};
   // 跟踪正在计数的文件夹
   final Set<String> _scanningFolders = {};
+
+  /// 磁盘上仍存在的已排除文件数量。
+  ///
+  /// 不能在构建时直接用 [SettingsProvider.excludedPaths] 的长度：
+  /// 用户可能在应用外把文件移走，路径却仍留在设置里，
+  /// 那样副标题会一直显示移走前的旧数字。
+  int _excludedExistingCount = 0;
 
   /// 正在为该文件夹准备播放（扫描中），用于禁用其播放按钮并显示进度
   final Set<String> _playingFolders = {};
@@ -318,6 +328,37 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
     }
   }
 
+  /// 重新统计所有已选文件夹与「已排除的文件」的数量。
+  ///
+  /// 文件可能在应用外被移走或删除，缓存与设置里的路径都会过期，
+  /// 因此每次进入本页（含从子页面返回）都要重新计算一遍。
+  void _refreshStats() {
+    if (!mounted) return;
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    setState(() {
+      _folderStats.clear();
+    });
+    for (final path in slideProvider.folderPaths) {
+      _countFolderImages(path);
+    }
+    _refreshExcludedCount();
+  }
+
+  /// 统计磁盘上仍存在的已排除文件数量。
+  ///
+  /// 与「已排除的文件」页面保持一致的判定口径（[File.existsSync]），
+  /// 从而让副标题数字与实际能打开的文件数量吻合。
+  void _refreshExcludedCount() {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    var count = 0;
+    for (final path in settings.excludedPaths) {
+      if (File(path).existsSync()) count++;
+    }
+    if (count != _excludedExistingCount) {
+      setState(() => _excludedExistingCount = count);
+    }
+  }
+
   /// 提取路径的最后一级目录名（兼容 / 和 \ 分隔符）
   String _getLastPathSegment(String path) {
     // 去掉末尾的分隔符
@@ -419,7 +460,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
       slideProvider.startPlay();
 
       if (!mounted) return;
-      Navigator.pushNamed(context, '/player');
+      openPlayerScreen(context);
     } finally {
       if (mounted) {
         setState(() {
@@ -449,7 +490,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
   /// 构建"已排除的文件"虚拟文件夹条目
   Widget _buildExcludedFolderTile() {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    final excludedCount = settings.excludedPaths.length;
+    // 只统计磁盘上仍存在的文件：用户可能在应用外把它们移走，
+    // 直接用 excludedPaths 的长度会一直显示移走前的旧数字
+    final excludedCount = _excludedExistingCount;
     final loc = AppLocalizations.of(context);
     // 找第一张仍然存在的已排除图片作为缩略图
     String? firstExcludedPath;
@@ -646,7 +689,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
     slideProvider.startPlay();
 
     if (mounted) {
-      Navigator.pushNamed(context, '/player');
+      openPlayerScreen(context);
     }
   }
 
@@ -714,37 +757,66 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen> {
   @override
   void initState() {
     super.initState();
-    // 页面初始化时，对已有的文件夹触发统计计算
+    HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
+    // 页面初始化时，重新统计已有的文件夹与已排除文件
     Future.microtask(() {
       if (!mounted) return;
-      final slideProvider = Provider.of<SlideProvider>(context, listen: false);
       final settingsProvider = Provider.of<SettingsProvider>(
         context,
         listen: false,
       );
       _previousRecursiveScan = settingsProvider.recursiveScan;
-      for (final path in slideProvider.folderPaths) {
-        _countFolderImages(path);
-      }
+      _refreshStats();
     });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // 订阅路由事件：从子页面返回本页时（didPopNext）需要重新统计
+    final route = ModalRoute.of(context);
+    if (route != null) {
+      appRouteObserver.subscribe(this, route);
+    }
     // 当递归扫描设置变化时，重新计算所有文件夹的统计信息
     final settingsProvider = Provider.of<SettingsProvider>(context);
     if (_previousRecursiveScan != settingsProvider.recursiveScan) {
       _previousRecursiveScan = settingsProvider.recursiveScan;
-      final slideProvider = Provider.of<SlideProvider>(context, listen: false);
-      // 清除缓存并重新计算
-      setState(() {
-        _folderStats.clear();
-      });
-      for (final path in slideProvider.folderPaths) {
-        _countFolderImages(path);
-      }
+      _refreshStats();
     }
+  }
+
+  /// 从子页面（已排除的文件 / 文件夹图片 / 播放页）返回本页时，
+  /// 文件可能已被移走或删除，重新统计一次。
+  ///
+  /// 延后到当前帧结束再执行，避免在路由回调里直接触发 setState。
+  @override
+  void didPopNext() {
+    Future.microtask(() {
+      if (mounted) _refreshStats();
+    });
+  }
+
+  @override
+  void dispose() {
+    appRouteObserver.unsubscribe(this);
+    HardwareKeyboard.instance.removeHandler(_hardwareKeyHandler);
+    super.dispose();
+  }
+
+  /// 键盘快捷键：ESC 返回主界面
+  ///
+  /// [HardwareKeyboard] 会无条件调用所有已注册的 handler，因此这里必须确认本页
+  /// 位于最上层：若本页之上还有对话框（如相册选择弹窗），该弹窗才是当前路由，
+  /// 此时不响应，避免一次按键既关闭弹窗又退出本页。
+  bool _hardwareKeyHandler(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (ModalRoute.of(context)?.isCurrent != true) return false;
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      Navigator.of(context).maybePop();
+      return true;
+    }
+    return false;
   }
 
   @override

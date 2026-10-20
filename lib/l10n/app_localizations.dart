@@ -158,17 +158,12 @@ class AppLocalizations {
     'Play images from subfolders too',
     '開啟後連子文件夾裡的圖片一起播放',
   );
-  String get infoDisplay => _t('信息显示', 'Info', '信息顯示');
   String get showImageInfo => _t('图片信息显示', 'Show Info', '圖片信息顯示');
   String get showImageInfoDesc => _t(
     '文件名/文件大小/分辨率/当前页码',
     'Name / Size / Resolution / Page',
     '文件名/文件大小/分辨率/當前頁碼',
   );
-  String get infoAutoHideLabel => _t('信息条自动隐藏', 'Auto-hide Info', '信息條自動隱藏');
-  String get infoAutoHideDesc =>
-      _t('几秒无操作自动消失', 'Hide after idle seconds', '幾秒無操作自動消失');
-  String get infoHideDelay => _t('信息隐藏延迟', 'Info Hide Delay', '信息隱藏延遲');
   String get controlsLabel => _t('快捷键与控制', 'Controls', '快捷鍵與控制');
   String get wheelSwitch => _t('滚轮行为', 'Scroll Wheel', '滾輪行為');
   String get wheelSwitchImage => _t('切换图片', 'Switch Image', '切換圖片');
@@ -198,6 +193,10 @@ class AppLocalizations {
   String get excluded => _t('图片已排除播放', 'Image excluded', '圖片已排除播放');
   String get deleted => _t('图片已删除', 'Image deleted', '圖片已刪除');
   String get shortcutTitle => _t('内置快捷键', 'Shortcuts', '內置快捷鍵');
+
+  /// 快捷键条目：按键 + 操作说明（按语言选用对应的分隔符）。
+  String shortcutItem(String key, String desc) =>
+      _t('$key：$desc', '$key: $desc', '$key：$desc');
   String get spaceKey => _t('空格', 'Space', '空格');
   String get playPause => _t('播放/暂停', 'Play / Pause', '播放/暫停');
   String get previous => _t('上一张', 'Previous', '上一張');
