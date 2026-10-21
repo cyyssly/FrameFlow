@@ -74,13 +74,13 @@ class AppLocalizations {
   // 首页
   String get startPlay => _t('开始播放', 'Start', '開始播放');
   String get selectAlbum => _t('选择相册', 'Albums', '選擇相冊');
-  String get selectFolder => _t('选择文件夹', 'Folders', '選擇文件夾');
+  String get selectFolder => _t('选择图片', 'Select Photos', '選擇圖片');
   String get settings => _t('设置', 'Settings', '設置');
   String get scanning => _t('正在扫描图片...', 'Scanning...', '正在掃描圖片...');
 
   // 相册选择页
   String get selectAlbumTitle => _t('选择相册', 'Albums', '選擇相冊');
-  String get selectFolderTitle => _t('选择文件夹', 'Folders', '選擇文件夾');
+  String get selectFolderTitle => _t('选择图片', 'Select Photos', '選擇圖片');
   String get addAlbum => _t('添加相册', 'Add Album', '添加相冊');
   String get addFolder => _t('添加文件夹', 'Add Folder', '添加文件夾');
   String get excludeAll => _t('全部排除', 'Exclude All', '全部排除');
@@ -288,6 +288,8 @@ class AppLocalizations {
   String get sortReverse => _t('逆序', 'Descending', '逆序');
   String get sortNewest => _t('最新', 'Newest', '最新');
   String get sortOldest => _t('最旧', 'Oldest', '最舊');
+  String get sortSmallest => _t('最小', 'Smallest', '最小');
+  String get sortLargest => _t('最大', 'Largest', '最大');
   String get sortRandom => _t('随机', 'Random', '隨機');
 
   // 帮助页
@@ -397,6 +399,87 @@ class AppLocalizations {
     '本應用完全免費、無廣告，如果它幫到了你，歡迎贊助支持。',
   );
   String get helpSponsorButton => _t('打开赞助页面', 'Open Sponsor Page', '打開贊助頁面');
+
+  // 局域网共享
+  String get lanSharePageTitle => _t('内网共享', 'LAN Sharing', '內網共享');
+  String get lanShareKeepAwakeHint => _t(
+    '停留在该页面时手机会保持常亮，以便其他终端读取播放本机共享的文件',
+    'The screen stays awake while this page is open so other devices can read your shared files',
+    '停留在該頁面時手機會保持常亮，以便其他終端讀取播放本機共享的文件',
+  );
+  String get lanShareFolderSwitchHint => _t(
+    '关闭开关后该文件夹不会共享给其他设备',
+    'Turn off to stop sharing this folder',
+    '關閉開關後該文件夾不會共享給其他設備',
+  );
+  String get localFoldersSection => _t('本地文件夹', 'Local Folders', '本地文件夾');
+  String get sharedFoldersSection => _t('共享文件夹', 'Shared Folders', '共享文件夾');
+  String get addShareSource => _t('添加共享源', 'Add Shared Source', '添加共享源');
+  String get lanSelectSharedFoldersHint =>
+      _t('选择要添加的共享文件夹', 'Select shared folders to add', '選擇要添加的共享文件夾');
+  String get playLocalFolders =>
+      _t('播放全部本地文件夹', 'Play all local folders', '播放全部本地文件夾');
+  String get playSharedFolders =>
+      _t('播放全部共享文件夹', 'Play all shared folders', '播放全部共享文件夾');
+  String get excludeLocalFolders =>
+      _t('排除全部本地文件夹', 'Exclude all local folders', '排除全部本地文件夾');
+  String get excludeSharedFolders =>
+      _t('排除全部共享文件夹', 'Exclude all shared folders', '排除全部共享文件夾');
+  String get lanReconnectFolder => _t('重新连接', 'Reconnect', '重新連接');
+  String get lanReconnectAll => _t('重新连接全部', 'Reconnect all', '重新連接全部');
+  String readingSharedFolder(String name) => _t(
+    '正在读取「$name」共享文件夹……',
+    'Reading shared folder "$name"...',
+    '正在讀取「$name」共享文件夾……',
+  );
+
+  /// 本机地址行：标题与首个地址同行，多个地址以换行分隔
+  String lanLocalAddressWith(String addresses) =>
+      _t('本机地址：$addresses', 'Local address: $addresses', '本機地址：$addresses');
+  String get lanShareBatteryHint => _t(
+    '如果觉得屏幕常亮太耗电，您可以返回主界面，或者手动关闭屏幕。但这些操作均可能导致断连，具体情况与手机品牌和省电策略相关，您可在自己的手机上测试。',
+    'If keep-awake drains too much battery, you can return to the home screen or turn off the screen manually. Either action may cause a disconnect; the behavior depends on your phone brand and power-saving policy, so test it on your own device.',
+    '如果覺得屏幕常亮太耗電，您可以返回主界面，或者手動關閉屏幕。但這些操作均可能導致斷連，具體情況與手機品牌和省電策略相關，您可在自己的手機上測試。',
+  );
+  String get lanShareTitle => _t('共享本机图片', 'Share This Device', '共享本機圖片');
+  String get lanShareDesc => _t(
+    '允许同一内网中的设备浏览并播放已选文件夹中的图片',
+    'Let devices on the same LAN browse and play images in selected folders',
+    '允許同一內網中的設備瀏覽並播放已選文件夾中的圖片',
+  );
+  String get lanShareNeedsFolders =>
+      _t('请先选择文件夹后再开启共享', 'Select folders before sharing', '請先選擇文件夾後再開啟共享');
+  String get lanNoDevices => _t('未发现内网设备', 'No devices found', '未發現內網設備');
+  String get lanNoFolders =>
+      _t('对方没有共享任何文件夹', 'The device shares no folders', '對方沒有共享任何文件夾');
+  String get lanManualAdd => _t('手动添加设备', 'Add Device Manually', '手動添加設備');
+  String get lanManualHint =>
+      _t('输入 IP 或 IP:端口', 'Enter IP or IP:port', '輸入 IP 或 IP:端口');
+  String get lanInvalidAddress => _t(
+    '地址格式不正确或设备无法访问',
+    'Invalid address or device unreachable',
+    '地址格式不正確或設備無法訪問',
+  );
+  String get lanSelfDevice =>
+      _t('这是本机设备', 'This is the current device', '這是本機設備');
+  String lanSharedFoldersCount(int count) =>
+      _t('共享 $count 个文件夹', '$count shared folders', '共享 $count 個文件夾');
+  String get lanLocalAddress => _t('本机地址', 'Local Address', '本機地址');
+  String get lanLoadFailed => _t(
+    '加载失败，请检查设备是否在线',
+    'Load failed. Check the device is online',
+    '加載失敗，請檢查設備是否在線',
+  );
+  String get lanPlayRemote => _t('播放此文件夹', 'Play Folder', '播放此文件夾');
+  String get lanServerStartFailed => _t(
+    '共享服务启动失败，请检查端口占用',
+    'Failed to start sharing. Check port usage',
+    '共享服務啟動失敗，請檢查端口佔用',
+  );
+  String get lanRefresh => _t('刷新', 'Refresh', '刷新');
+  String get lanAdd => _t('添加', 'Add', '添加');
+  String get lanRetry => _t('重试', 'Retry', '重試');
+  String get lanRemove => _t('移除', 'Remove', '移除');
 
   // 内部翻译方法
   String _t(String zhCN, String en, String zhTW) {

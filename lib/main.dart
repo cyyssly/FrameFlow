@@ -7,6 +7,7 @@ import 'package:frame_flow/screens/player_screen.dart';
 import 'package:frame_flow/screens/settings_screen.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/providers/lan_provider.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 import 'dart:io';
 
@@ -35,11 +36,18 @@ void main() async {
     slideProvider.setFolderPaths(settingsProvider.lastFolderPaths);
   }
 
+  final lanProvider = LanProvider(
+    settings: settingsProvider,
+    slide: slideProvider,
+  );
+  await lanProvider.initialize();
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: settingsProvider),
         ChangeNotifierProvider.value(value: slideProvider),
+        ChangeNotifierProvider.value(value: lanProvider),
       ],
       child: const MyApp(),
     ),

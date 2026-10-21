@@ -14,7 +14,7 @@ import 'package:frame_flow/widgets/masonry_image_grid.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 /// 瀑布流排序方式
-enum _SortMode { byName, byTime, random }
+enum _SortMode { byName, byTime, bySize, random }
 
 /// 文件夹图片瀑布流浏览页
 ///
@@ -55,6 +55,9 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
 
   /// 最新模式下是否最新在前（true = 最新，false = 最旧）
   bool _newestFirst = true;
+
+  /// 大小模式下是否大文件在前（true = 最大，false = 最小）
+  bool _largestFirst = true;
 
   /// 批次代次：每次重新排序都自增，使跨越排序、尚在途中的旧批次作废，
   /// 避免把「旧顺序下的这一批已就绪」错误地记到新顺序的批次边界上。
@@ -244,9 +247,26 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
           return _newestFirst ? -cmp : cmp;
         });
         break;
+      case _SortMode.bySize:
+        _allItems.sort((a, b) {
+          final cmp = _sizeOf(a).compareTo(_sizeOf(b));
+          return _largestFirst ? -cmp : cmp;
+        });
+        break;
       case _SortMode.random:
         _allItems.shuffle();
         break;
+    }
+  }
+
+  /// 读取文件大小；远端图片自带大小，本地图片回退到 File.lengthSync
+  int _sizeOf(ImageItem item) {
+    final known = item.size;
+    if (known != null) return known;
+    try {
+      return File(item.path).lengthSync();
+    } catch (_) {
+      return 0;
     }
   }
 
@@ -288,6 +308,17 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     } else {
       _sortMode = _SortMode.byTime;
       _newestFirst = true;
+    }
+    _resort();
+  }
+
+  /// 大小：点击切到大小模式；已在大小模式时，再次点击在最大/最小间切换
+  void _onSortBySizePressed() {
+    if (_sortMode == _SortMode.bySize) {
+      _largestFirst = !_largestFirst;
+    } else {
+      _sortMode = _SortMode.bySize;
+      _largestFirst = true;
     }
     _resort();
   }
@@ -417,6 +448,13 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
                 tooltip: _newestFirst ? loc.sortNewest : loc.sortOldest,
                 active: _sortMode == _SortMode.byTime,
                 onPressed: _onSortByTimePressed,
+              ),
+              // 最大/最小：用一对方向相反的箭头表示降序/升序
+              _buildSortButton(
+                icon: _largestFirst ? Icons.south : Icons.north,
+                tooltip: _largestFirst ? loc.sortLargest : loc.sortSmallest,
+                active: _sortMode == _SortMode.bySize,
+                onPressed: _onSortBySizePressed,
               ),
               // 随机（每次点击重新打乱）
               _buildSortButton(

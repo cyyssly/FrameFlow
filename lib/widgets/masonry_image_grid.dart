@@ -65,6 +65,17 @@ class MasonryImageGrid extends StatelessWidget {
   static ImageProvider imageProviderFor(String path, BuildContext context) =>
       ResizeImage(FileImage(File(path)), width: decodeWidthFor(context));
 
+  /// 与 [imageProviderFor] 相同，但支持局域网远端图片（优先使用缩略图）。
+  static ImageProvider imageProviderForItem(
+    ImageItem item,
+    BuildContext context,
+  ) {
+    if (!item.isRemote) return imageProviderFor(item.path, context);
+    final url = item.thumbUrl ?? item.remoteUrl;
+    if (url == null || url.isEmpty) return imageProviderFor(item.path, context);
+    return ResizeImage(NetworkImage(url), width: decodeWidthFor(context));
+  }
+
   /// 把一批图片真正解码进 [ImageCache]，滚动到它们时即可直接命中缓存。
   /// 仅读取宽高比不会解码像素，必须调用本方法才能消除滚动卡顿。
   /// [concurrency] 为同时解码的张数，过大反而会互相抢占 IO 与解码线程。
@@ -88,6 +99,31 @@ class MasonryImageGrid extends StatelessWidget {
       );
     }
   }
+
+  /// 预解码一批图片项（同时支持本地与远端）
+  static Future<void> precacheItems(
+    List<ImageItem> items,
+    BuildContext context, {
+    int concurrency = 6,
+  }) async {
+    for (var i = 0; i < items.length; i += concurrency) {
+      if (!context.mounted) return;
+      final chunk = items.skip(i).take(concurrency);
+      await Future.wait(
+        chunk.map(
+          (item) => precacheImage(
+            imageProviderForItem(item, context),
+            context,
+            onError: (_, _) {},
+          ),
+        ),
+      );
+    }
+  }
+
+  /// 是否显示悬停/选中时的操作按钮覆盖层。
+  /// 远端浏览为只读，可直接关闭覆盖层。
+  final bool showOverlay;
 
   final List<ImageItem> items;
   final int? selectedIndex;
@@ -135,6 +171,7 @@ class MasonryImageGrid extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     required this.onDelete,
+    this.showOverlay = true,
     this.singleActionOverlay = false,
     this.singleActionIcon = Icons.delete_outline,
     this.singleActionColor = Colors.redAccent,
@@ -206,6 +243,7 @@ class MasonryImageGrid extends StatelessWidget {
                           ? null
                           : () => onLongPress!(index),
                       onDelete: () => onDelete(index),
+                      showOverlay: showOverlay,
                       singleActionOverlay: singleActionOverlay,
                       singleActionIcon: singleActionIcon,
                       singleActionColor: singleActionColor,
@@ -252,6 +290,9 @@ class _MasonryImageCard extends StatefulWidget {
   final VoidCallback? onLongPress;
   final VoidCallback onDelete;
 
+  /// 是否显示操作按钮覆盖层
+  final bool showOverlay;
+
   /// 覆盖层是否只显示右下角的单个按钮
   final bool singleActionOverlay;
   final IconData singleActionIcon;
@@ -272,6 +313,7 @@ class _MasonryImageCard extends StatefulWidget {
     required this.onTap,
     this.onLongPress,
     required this.onDelete,
+    required this.showOverlay,
     required this.singleActionOverlay,
     required this.singleActionIcon,
     required this.singleActionColor,
@@ -322,8 +364,8 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
                 Image(
                   // 与预解码共用同一个 Provider（含相同的 cacheWidth），
                   // 卡片滚动到可见区域时可直接命中 ImageCache，无需重新解码
-                  image: MasonryImageGrid.imageProviderFor(
-                    widget.item.path,
+                  image: MasonryImageGrid.imageProviderForItem(
+                    widget.item,
                     context,
                   ),
                   fit: BoxFit.fill,
@@ -332,7 +374,7 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
                   errorBuilder: (_, _, _) => const Icon(Icons.broken_image),
                 ),
                 // 悬停 或 选中 时显示覆盖层（只有图标按钮，无暗色遮罩）
-                if (highlighted) _buildOverlay(context),
+                if (highlighted && widget.showOverlay) _buildOverlay(context),
               ],
             ),
           ),

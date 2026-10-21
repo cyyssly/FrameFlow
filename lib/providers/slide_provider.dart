@@ -30,7 +30,7 @@ class SlideProvider extends ChangeNotifier {
 
   void addImages(List<ImageItem> images) {
     for (final image in images) {
-      if (!_images.any((img) => img.path == image.path)) {
+      if (!_images.any((img) => img.key == image.key)) {
         _images.add(image);
       }
     }
@@ -204,7 +204,7 @@ class SlideProvider extends ChangeNotifier {
   void addNewImages(List<ImageItem> newImages, PlayOrder order) {
     int addedCount = 0;
     for (final image in newImages) {
-      if (_images.any((existing) => existing.path == image.path)) continue;
+      if (_images.any((existing) => existing.key == image.key)) continue;
 
       int insertIndex;
       switch (order) {
@@ -215,10 +215,10 @@ class SlideProvider extends ChangeNotifier {
           insertIndex = _findInsertIndexByNameDescending(image.name);
           break;
         case PlayOrder.newestFirst:
-          insertIndex = _findInsertIndexByTime(image.path, newestFirst: true);
+          insertIndex = _findInsertIndexByTime(image, newestFirst: true);
           break;
         case PlayOrder.oldestFirst:
-          insertIndex = _findInsertIndexByTime(image.path, newestFirst: false);
+          insertIndex = _findInsertIndexByTime(image, newestFirst: false);
           break;
         case PlayOrder.random:
           insertIndex = _images.length;
@@ -293,34 +293,47 @@ class SlideProvider extends ChangeNotifier {
 
   /// 二分查找按修改时间的插入位置
   /// [newestFirst] = true: 从新到旧（降序），false: 从旧到新（升序）
-  int _findInsertIndexByTime(String imagePath, {required bool newestFirst}) {
-    DateTime? newTime;
-    try {
-      newTime = File(imagePath).lastModifiedSync();
-    } catch (_) {
-      return _images.length; // 无法获取时间，放到末尾
-    }
-
+  int _findInsertIndexByTime(ImageItem image, {required bool newestFirst}) {
     int low = 0, high = _images.length;
     while (low < high) {
       final mid = (low + high) ~/ 2;
-      DateTime? midTime;
-      try {
-        midTime = File(_images[mid].path).lastModifiedSync();
-      } catch (_) {
-        midTime = newestFirst ? DateTime(0) : DateTime(9999);
-      }
-
-      final cmp = midTime.compareTo(newTime);
-      // newestFirst: 降序（新→旧），所以 new > mid 时靠前
-      final adjusted = newestFirst ? -cmp : cmp;
-      if (adjusted < 0) {
+      if (_compareByModifiedTime(
+            _images[mid],
+            image,
+            newestFirst: newestFirst,
+          ) <=
+          0) {
         low = mid + 1;
       } else {
         high = mid;
       }
     }
     return low;
+  }
+
+  /// 读取图片修改时间：远端图片直接使用其提供的值，本地图片回退到文件系统。
+  static DateTime? _modifiedTime(ImageItem item) {
+    if (item.modifiedAt != null) return item.modifiedAt;
+    if (item.path.isEmpty) return null;
+    try {
+      return File(item.path).lastModifiedSync();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 按修改时间比较，无法获取时间的项一律排在末尾。
+  static int _compareByModifiedTime(
+    ImageItem a,
+    ImageItem b, {
+    required bool newestFirst,
+  }) {
+    final aTime = _modifiedTime(a);
+    final bTime = _modifiedTime(b);
+    if (aTime == null && bTime == null) return 0;
+    if (aTime == null) return 1;
+    if (bTime == null) return -1;
+    return newestFirst ? bTime.compareTo(aTime) : aTime.compareTo(bTime);
   }
 
   /// 根据播放顺序模式对图片列表进行排序
@@ -336,27 +349,13 @@ class SlideProvider extends ChangeNotifier {
         break;
       case PlayOrder.newestFirst:
         // 按文件修改时间从新到旧
-        _images.sort((a, b) {
-          try {
-            final aTime = File(a.path).lastModifiedSync();
-            final bTime = File(b.path).lastModifiedSync();
-            return bTime.compareTo(aTime);
-          } catch (_) {
-            return 0;
-          }
-        });
+        _images.sort((a, b) => _compareByModifiedTime(a, b, newestFirst: true));
         break;
       case PlayOrder.oldestFirst:
         // 按文件修改时间从旧到新
-        _images.sort((a, b) {
-          try {
-            final aTime = File(a.path).lastModifiedSync();
-            final bTime = File(b.path).lastModifiedSync();
-            return aTime.compareTo(bTime);
-          } catch (_) {
-            return 0;
-          }
-        });
+        _images.sort(
+          (a, b) => _compareByModifiedTime(a, b, newestFirst: false),
+        );
         break;
       case PlayOrder.random:
         // 随机模式不排序图片本身，使用 `_randomOrder` 序列
@@ -364,15 +363,7 @@ class SlideProvider extends ChangeNotifier {
       case PlayOrder.newPreferred:
         // 新图优先：加权随机重排，新图有更高概率放在前面
         // 1. 先按修改时间从新到旧排序
-        _images.sort((a, b) {
-          try {
-            final aTime = File(a.path).lastModifiedSync();
-            final bTime = File(b.path).lastModifiedSync();
-            return bTime.compareTo(aTime);
-          } catch (_) {
-            return 0;
-          }
-        });
+        _images.sort((a, b) => _compareByModifiedTime(a, b, newestFirst: true));
         // 2. 加权随机打乱：越新的图偏移越小，保留靠前位置
         final rng = Random();
         for (int i = 0; i < _images.length; i++) {

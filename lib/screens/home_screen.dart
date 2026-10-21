@@ -4,8 +4,10 @@ import 'package:provider/provider.dart';
 import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/providers/lan_provider.dart';
 import 'package:frame_flow/screens/folder_selection_screen.dart';
 import 'package:frame_flow/screens/help_screen.dart';
+import 'package:frame_flow/screens/lan_devices_screen.dart';
 import 'package:frame_flow/screens/player_screen.dart';
 import 'package:frame_flow/services/media_store_service.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
@@ -19,6 +21,9 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _isAutoScanning = false;
+
+  /// 扫描进度提示（如“正在读取某某共享文件夹……”）
+  String _scanStatusText = '';
 
   @override
   void initState() {
@@ -54,9 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
       for (final folderPath in slideProvider.folderPaths) {
         final images = await _scanFolder(folderPath, settingsProvider);
         for (final image in images) {
-          if (!uniqueImages.containsKey(image.path)) {
-            uniqueImages[image.path] = image;
-          }
+          uniqueImages[image.key] = image;
 
           // 随机模式：边扫描边播放，每隔300ms增量更新列表
           if (isRandomMode) {
@@ -229,8 +232,10 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       listen: false,
     );
+    final lanProvider = Provider.of<LanProvider>(context, listen: false);
+    final sharedRefs = settingsProvider.sharedFolders;
 
-    if (slideProvider.folderPaths.isEmpty) {
+    if (slideProvider.folderPaths.isEmpty && sharedRefs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(AppLocalizations.of(context).msgSelectFolderFirst),
@@ -244,20 +249,39 @@ class _HomeScreenState extends State<HomeScreen> {
     // 总是重新扫描所有文件夹，确保获取完整的图片列表
     setState(() {
       _isAutoScanning = true;
+      _scanStatusText = AppLocalizations.of(context).scanning;
     });
 
     try {
       // 使用 Map 进行去重
       final uniqueImages = <String, ImageItem>{};
+      final loc = AppLocalizations.of(context);
 
-      // 逐个扫描文件夹
+      // 逐个扫描本地文件夹
       for (final folderPath in slideProvider.folderPaths) {
         final images = await _scanFolder(folderPath, settingsProvider);
         for (final image in images) {
-          if (!uniqueImages.containsKey(image.path)) {
-            uniqueImages[image.path] = image;
+          uniqueImages[image.key] = image;
+        }
+      }
+
+      // 继续读取共享文件夹（离线设备自动跳过），并提示当前读取进度
+      if (sharedRefs.isNotEmpty) {
+        await lanProvider.probeSharedDevices(sharedRefs);
+        for (final ref in sharedRefs) {
+          if (!mounted) return;
+          if (!lanProvider.isDeviceReachable(ref.deviceId)) continue;
+          setState(() {
+            _scanStatusText = loc.readingSharedFolder(ref.folderName);
+          });
+          final images = await lanProvider.loadSharedFolderImages(ref);
+          if (images == null) continue;
+          for (final image in images) {
+            uniqueImages[image.key] = image;
           }
         }
+        if (!mounted) return;
+        setState(() => _scanStatusText = loc.scanning);
       }
 
       // 按文件名排序
@@ -302,6 +326,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _isAutoScanning = false;
+          _scanStatusText = '';
         });
       }
     }
@@ -326,182 +351,248 @@ class _HomeScreenState extends State<HomeScreen> {
         elevation: 0,
       ),
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_isAutoScanning) ...[
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(
-                AppLocalizations.of(context).scanning,
-                style: const TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-            ] else ...[
-              SizedBox(
-                width: MediaQuery.of(context).size.width * 0.5,
-                child: ElevatedButton(
-                  onPressed: () => _startPlayback(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00b894),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 4,
-                    shadowColor: const Color(0xFF00b894).withValues(alpha: 0.4),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.play_circle, size: 24),
-                      const SizedBox(width: 12),
-                      Text(
-                        AppLocalizations.of(context).startPlay,
-                        style: const TextStyle(fontSize: 18),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (_isAutoScanning) ...[
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                Text(
+                  _scanStatusText.isEmpty
+                      ? AppLocalizations.of(context).scanning
+                      : _scanStatusText,
+                  style: const TextStyle(fontSize: 16, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                ),
+              ] else ...[
+                SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.5,
+                  child: ElevatedButton(
+                    onPressed: () => _startPlayback(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00b894),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
                       ),
-                    ],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 4,
+                      shadowColor: const Color(
+                        0xFF00b894,
+                      ).withValues(alpha: 0.4),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.play_circle, size: 24),
+                        const SizedBox(width: 12),
+                        Text(
+                          AppLocalizations.of(context).startPlay,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: MediaQuery.of(context).size.width * 0.5,
-                child: isAndroid
-                    ? ElevatedButton(
-                        onPressed: () => _selectFolder(context),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0984e3),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 32,
-                            vertical: 16,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 3,
-                          shadowColor: const Color(
-                            0xFF0984e3,
-                          ).withValues(alpha: 0.3),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.photo_library, size: 24),
-                            const SizedBox(width: 12),
-                            Text(
-                              AppLocalizations.of(context).selectAlbum,
-                              style: const TextStyle(fontSize: 18),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.5,
+                  child: isAndroid
+                      ? ElevatedButton(
+                          onPressed: () => _selectFolder(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0984e3),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 32,
+                              vertical: 16,
                             ),
-                          ],
-                        ),
-                      )
-                    : ElevatedButton(
-                        onPressed: () => _selectFolder(context),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0984e3),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 32,
-                            vertical: 16,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 3,
-                          shadowColor: const Color(
-                            0xFF0984e3,
-                          ).withValues(alpha: 0.3),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.folder_open, size: 24),
-                            const SizedBox(width: 12),
-                            Text(
-                              AppLocalizations.of(context).selectFolder,
-                              style: const TextStyle(fontSize: 18),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                          ],
+                            elevation: 3,
+                            shadowColor: const Color(
+                              0xFF0984e3,
+                            ).withValues(alpha: 0.3),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.photo_library, size: 24),
+                              const SizedBox(width: 12),
+                              Text(
+                                AppLocalizations.of(context).selectAlbum,
+                                style: const TextStyle(fontSize: 18),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ElevatedButton(
+                          onPressed: () => _selectFolder(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0984e3),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 32,
+                              vertical: 16,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 3,
+                            shadowColor: const Color(
+                              0xFF0984e3,
+                            ).withValues(alpha: 0.3),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.folder_open, size: 24),
+                              const SizedBox(width: 12),
+                              Text(
+                                AppLocalizations.of(context).selectFolder,
+                                style: const TextStyle(fontSize: 18),
+                              ),
+                            ],
+                          ),
                         ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.5,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      final slide = Provider.of<SlideProvider>(
+                        context,
+                        listen: false,
+                      );
+                      if (slide.folderPaths.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              AppLocalizations.of(context).lanShareNeedsFolders,
+                            ),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const LanDevicesScreen(),
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF00cec9),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
                       ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: MediaQuery.of(context).size.width * 0.5,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pushNamed(context, '/settings'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6c5ce7),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 3,
-                    shadowColor: const Color(0xFF6c5ce7).withValues(alpha: 0.3),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.settings, size: 24),
-                      const SizedBox(width: 12),
-                      Text(
-                        AppLocalizations.of(context).settings,
-                        style: const TextStyle(fontSize: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    ],
+                      elevation: 3,
+                      shadowColor: const Color(
+                        0xFF00cec9,
+                      ).withValues(alpha: 0.3),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.devices, size: 24),
+                        const SizedBox(width: 12),
+                        Text(
+                          AppLocalizations.of(context).lanSharePageTitle,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: MediaQuery.of(context).size.width * 0.5,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pushNamed(context, '/help'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFe17055),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 16,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 3,
-                    shadowColor: const Color(0xFFe17055).withValues(alpha: 0.3),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.help_outline, size: 24),
-                      const SizedBox(width: 12),
-                      Text(
-                        AppLocalizations.of(context).help,
-                        style: const TextStyle(fontSize: 18),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.5,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pushNamed(context, '/settings'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF6c5ce7),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
                       ),
-                    ],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 3,
+                      shadowColor: const Color(
+                        0xFF6c5ce7,
+                      ).withValues(alpha: 0.3),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.settings, size: 24),
+                        const SizedBox(width: 12),
+                        Text(
+                          AppLocalizations.of(context).settings,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                appVersionLabel,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white.withValues(alpha: 0.3),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.5,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pushNamed(context, '/help'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFe17055),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 3,
+                      shadowColor: const Color(
+                        0xFFe17055,
+                      ).withValues(alpha: 0.3),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.help_outline, size: 24),
+                        const SizedBox(width: 12),
+                        Text(
+                          AppLocalizations.of(context).help,
+                          style: const TextStyle(fontSize: 18),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 24),
+                Text(
+                  appVersionLabel,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white.withValues(alpha: 0.3),
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

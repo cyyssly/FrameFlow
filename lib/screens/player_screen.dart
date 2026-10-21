@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:image/image.dart' as img;
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 import 'package:frame_flow/services/fullscreen_service.dart';
 import 'package:frame_flow/utils/rotated_fit.dart';
@@ -344,6 +345,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// [invertAction] 为 true 时执行与“删除行为”设置相反的动作（对应 Ctrl+Del）。
   void _showDeleteConfirmation({bool invertAction = false}) {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    // 远端图片为只读，不允许排除或删除
+    if (slideProvider.images[slideProvider.currentIndex].isRemote) return;
     final action = _effectiveDeleteAction(settings, invertAction);
 
     // 如果是排除播放，直接执行操作，不需要确认，也不需要退出全屏
@@ -438,6 +442,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final currentIndex = slideProvider.currentIndex;
     final currentImage = slideProvider.images[currentIndex];
+    if (currentImage.isRemote) return true;
 
     if (action == DeleteAction.delete) {
       // 实际删除文件
@@ -682,26 +687,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideControlsDelayed();
   }
 
-  /// 鼠标在画面上移动也算一次“操作”。
+  /// 鼠标在画面上移动算一次“操作”，只用于顺延自动隐藏的计时。
   ///
-  /// 此前自动隐藏计时只在点按 / 松手 / 点按钮等事件后重启，鼠标移动不会刷新它，
-  /// 于是“手一直在动、工具栏却照样到点隐藏”。这里把移动也视为操作：
-  /// 工具栏仍显示时顺延计时；已隐藏时先把光标与工具栏重新显示出来。
+  /// 不再恢复显示工具栏：使用滚轮时很容易轻微晃动鼠标，
+  /// 若移动就能唤出工具栏，会出现意外弹出。恢复显示只由左键点击触发。
   ///
-  /// 悬浮事件触发极其频繁，因此仅在可见性需要变化时才走会 setState 的
-  /// [_showControlsTemporarily]，其余情况只重启计时器，避免整页反复重建。
+  /// 悬浮事件触发极其频繁，因此这里不调用 setState，也不重建任何组件，
+  /// 仅在工具栏可见时重启隐藏计时器。
   void _handlePointerHover(PointerHoverEvent event) {
     if (event.kind != PointerDeviceKind.mouse) return;
     // 手势进行中（按下拖动 / 捏合）交给原有逻辑处理，避免交叉
     if (_isGestureActive || _pointerCount > 0) return;
+    // 已隐藏时不再因移动而显示
+    if (!_showControls) return;
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    // 未开启自动隐藏工具栏时，工具栏本就常显，无需处理
     if (!settings.hideToolbar) return;
-    if (!_showControls) {
-      _showControlsTemporarily();
-    } else {
-      _deferControlHide();
-    }
+    _deferControlHide();
   }
 
   /// 只在手势确实已经结束（没有任何指针按下）时才隐藏工具栏。
@@ -720,8 +721,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// 显示工具栏（含图片信息栏），并在超时后自动隐藏。
   ///
-  /// 由真正的“点击”（松手时判定为轻点）触发；工具栏已隐藏时鼠标移动
-  /// （见 [_handlePointerHover]）也会触发。按下瞬间不再弹出，
+  /// 仅由真正的“点击”（松手时判定为轻点）触发；鼠标移动不算操作，
+  /// 避免滚轮滚动时轻微晃动鼠标就把工具栏弹回来。按下瞬间不弹出，
   /// 避免缩放时工具栏闪现。
   void _showControlsTemporarily() {
     if (!mounted) return;
@@ -1066,7 +1067,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   /// 为当前图片建立图片流监听，取得原始像素尺寸以计算平移边界
-  void _updateIntrinsicSize(int index, String path) {
+  void _updateIntrinsicSize(int index, ImageItem item) {
     if (_intrinsicSizeForIndex == index && _intrinsicSize != null) return;
     if (_intrinsicSizeForIndex == index) return; // 已发起过请求，等待回调
 
@@ -1074,9 +1075,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _intrinsicSize = null;
     _detachIntrinsicSizeListener();
 
-    // 关键：使用与 Image.file 完全相同的 provider（字节相同 → 缓存键相同），
+    // 关键：使用与渲染完全相同的 provider（字节相同 → 缓存键相同），
     // 因此这里不会产生额外解码，只是复用已有的 ImageCache 条目。
-    final provider = FileImage(File(path));
+    final provider = _imageProviderFor(item);
     late final ImageStreamListener listener;
     listener = ImageStreamListener(
       (info, synchronousCall) {
@@ -1134,6 +1135,47 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _intrinsicStream = null;
     _intrinsicListener = null;
+  }
+
+  /// 本地图片读取文件，远端图片走网络地址
+  static ImageProvider _imageProviderFor(ImageItem item) {
+    final url = item.remoteUrl;
+    if (item.isRemote && url != null && url.isNotEmpty) {
+      return NetworkImage(url);
+    }
+    return FileImage(File(item.path));
+  }
+
+  /// 远端图片是否可以用缩略图做加载占位。
+  ///
+  /// “原图大小”模式下缩略图与原图的显示尺寸不同，加载完成后会跳变，
+  /// 因此该模式不使用占位图。
+  static bool _useThumbPlaceholder(ImageItem item, SettingsProvider settings) {
+    final thumb = item.thumbUrl;
+    return item.isRemote &&
+        thumb != null &&
+        thumb.isNotEmpty &&
+        settings.imageFitMode != ImageFitMode.original;
+  }
+
+  /// 预取后续远端图片，减少切换时的空白等待
+  void _precacheRemoteNeighbors(SlideProvider slide) {
+    if (!mounted || slide.images.length < 2) return;
+    // 缩略图体积小，先多预取几张，保证切图时占位图立刻可见
+    final thumbCount = math.min(3, slide.images.length - 1);
+    for (var i = 1; i <= thumbCount; i++) {
+      final item = slide.images[(slide.currentIndex + i) % slide.images.length];
+      final thumb = item.thumbUrl;
+      if (!item.isRemote || thumb == null || thumb.isEmpty) continue;
+      unawaited(
+        precacheImage(NetworkImage(thumb), context, onError: (_, _) {}),
+      );
+    }
+    // 原图只预取下一张，避免大图抢占带宽与图片缓存
+    final next = slide.images[(slide.currentIndex + 1) % slide.images.length];
+    final url = next.remoteUrl;
+    if (!next.isRemote || url == null || url.isEmpty) return;
+    unawaited(precacheImage(NetworkImage(url), context, onError: (_, _) {}));
   }
 
   void _rotateImage() {
@@ -1363,18 +1405,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// 从缓存取文件大小文本；未缓存时返回占位符并触发异步加载。
   ///
   /// 切勿在 build 中直接读盘/解码，否则每次重建都会阻塞 UI 线程。
-  String _fileSizeLabel(String path) {
-    final cached = _fileSizeCache[path];
+  String _fileSizeLabel(ImageItem item) {
+    if (item.isRemote) {
+      final size = item.size;
+      return size == null
+          ? AppLocalizations.of(context).unknown
+          : _formatSize(size);
+    }
+    final cached = _fileSizeCache[item.path];
     if (cached != null) return cached;
-    unawaited(_loadImageMeta(path));
+    unawaited(_loadImageMeta(item.path));
     return '…';
   }
 
   /// 从缓存取分辨率文本；未缓存时返回占位符并触发异步加载。
-  String _resolutionLabel(String path) {
-    final cached = _resolutionCache[path];
+  String _resolutionLabel(ImageItem item) {
+    if (item.isRemote) {
+      // 远端分辨率复用播放器已解码出的原始尺寸
+      final intrinsic = _intrinsicSize;
+      if (intrinsic == null) return '…';
+      return '${intrinsic.width.toInt()} x ${intrinsic.height.toInt()}';
+    }
+    final cached = _resolutionCache[item.path];
     if (cached != null) return cached;
-    unawaited(_loadImageMeta(path));
+    unawaited(_loadImageMeta(item.path));
     return '…';
   }
 
@@ -1403,12 +1457,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  static String _formatSize(int size) {
+    if (size < 1024) return '$size B';
+    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
+    return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
   static Future<String> _formatFileSize(File file, String unknownText) async {
     try {
-      final size = await file.length();
-      if (size < 1024) return '$size B';
-      if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
-      return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+      return _formatSize(await file.length());
     } catch (_) {
       return unknownText;
     }
@@ -1577,11 +1634,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _updateOrientationRotation(slideProvider, settings);
           _applyScreenOrientation(settings);
           // 同步当前图片的原始尺寸，用于计算缩放后的平移边界
-          _updateIntrinsicSize(
-            slideProvider.currentIndex,
-            slideProvider.images[slideProvider.currentIndex].path,
-          );
+          final currentImage = slideProvider.images[slideProvider.currentIndex];
+          _updateIntrinsicSize(slideProvider.currentIndex, currentImage);
+          // 远端图片提前预取后两张，减少切图时的等待
+          if (currentImage.isRemote) {
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _precacheRemoteNeighbors(slideProvider),
+            );
+          }
         }
+
+        final currentItem = slideProvider.images[slideProvider.currentIndex];
 
         return Scaffold(
           backgroundColor: settings.background,
@@ -1589,8 +1652,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             autofocus: true,
             child: Listener(
               onPointerSignal: _handleScroll,
-              // 鼠标移动同样算“操作”：用于顺延/恢复工具栏的自动隐藏（见
-              // _handlePointerHover）。触屏没有 hover 事件，不受影响。
+              // 鼠标移动只顺延自动隐藏计时，不恢复显示（见 _handlePointerHover）
               onPointerHover: _handlePointerHover,
               // 用于“完全松手”才恢复工具栏：GestureDetector 的 onScaleEnd
               // 无法覆盖“双指后先抬一根手指、另一根继续停住”的情形。
@@ -1675,21 +1737,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 // 后再交给图片适配，于是 contain 的短边能真正贴满
                                 // 屏幕短边（与 [_displayBaseSize] 的算法一致）。
                                 quarterTurns: _quarterTurns,
-                                child: Image.file(
-                                  File(
-                                    slideProvider
-                                        .images[slideProvider.currentIndex]
-                                        .path,
-                                  ),
-                                  fit: settings.boxFit,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      Center(
-                                        child: Text(
-                                          AppLocalizations.of(
-                                            context,
-                                          ).imageLoadFailed,
-                                        ),
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    // 远端原图较大时下载/解码需要时间，
+                                    // 先铺一张缩略图，避免切换时出现黑屏
+                                    if (_useThumbPlaceholder(
+                                      currentItem,
+                                      settings,
+                                    ))
+                                      Image.network(
+                                        currentItem.thumbUrl!,
+                                        fit: settings.boxFit,
+                                        gaplessPlayback: true,
+                                        errorBuilder:
+                                            (context, error, stackTrace) =>
+                                                const SizedBox.shrink(),
                                       ),
+                                    Image(
+                                      image: _imageProviderFor(currentItem),
+                                      fit: settings.boxFit,
+                                      gaplessPlayback: true,
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                            if (_useThumbPlaceholder(
+                                              currentItem,
+                                              settings,
+                                            )) {
+                                              return const SizedBox.shrink();
+                                            }
+                                            return Center(
+                                              child: Text(
+                                                AppLocalizations.of(
+                                                  context,
+                                                ).imageLoadFailed,
+                                              ),
+                                            );
+                                          },
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1740,31 +1826,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           : _enterFullscreen,
                                     ),
                                   ),
-                                Tooltip(
-                                  message:
-                                      settings.deleteAction ==
-                                          DeleteAction.exclude
-                                      ? AppLocalizations.of(
-                                          context,
-                                        ).excludeFromPlay
-                                      : AppLocalizations.of(
-                                          context,
-                                        ).deleteFileLabel,
-                                  child: IconButton(
-                                    icon: Icon(
-                                      settings.deleteAction ==
-                                              DeleteAction.exclude
-                                          ? Icons.block
-                                          : Icons.delete,
-                                      color:
-                                          settings.deleteAction ==
-                                              DeleteAction.exclude
-                                          ? Colors.orange
-                                          : Colors.red,
+                                // 远端图片为只读，不显示删除按钮
+                                if (!slideProvider
+                                    .images[slideProvider.currentIndex]
+                                    .isRemote)
+                                  Tooltip(
+                                    message:
+                                        settings.deleteAction ==
+                                            DeleteAction.exclude
+                                        ? AppLocalizations.of(
+                                            context,
+                                          ).excludeFromPlay
+                                        : AppLocalizations.of(
+                                            context,
+                                          ).deleteFileLabel,
+                                    child: IconButton(
+                                      icon: Icon(
+                                        settings.deleteAction ==
+                                                DeleteAction.exclude
+                                            ? Icons.block
+                                            : Icons.delete,
+                                        color:
+                                            settings.deleteAction ==
+                                                DeleteAction.exclude
+                                            ? Colors.orange
+                                            : Colors.red,
+                                      ),
+                                      onPressed: _showDeleteConfirmation,
                                     ),
-                                    onPressed: _showDeleteConfirmation,
                                   ),
-                                ),
                                 Tooltip(
                                   message: AppLocalizations.of(context).rotate,
                                   child: IconButton(
@@ -1824,8 +1914,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                               _fileSizeLabel(
                                                 slideProvider
                                                     .images[slideProvider
-                                                        .currentIndex]
-                                                    .path,
+                                                    .currentIndex],
                                               ),
                                               style: const TextStyle(
                                                 fontSize: 12,
@@ -1837,8 +1926,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                               _resolutionLabel(
                                                 slideProvider
                                                     .images[slideProvider
-                                                        .currentIndex]
-                                                    .path,
+                                                    .currentIndex],
                                               ),
                                               style: const TextStyle(
                                                 fontSize: 12,

@@ -1,6 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:frame_flow/models/lan_models.dart';
 
 /// 播放顺序
 ///
@@ -81,7 +86,21 @@ class SettingsProvider extends ChangeNotifier {
   // 是否启用自定义换片时间：开启时 _customInterval 生效，_interval 仅保留滑块位置
   bool _useCustomInterval = false;
 
-  // Getters
+  // 局域网共享
+  bool _lanShareEnabled = false;
+
+  /// 本地文件夹是否共享给其他设备的单独开关（缺省视为共享）
+  Map<String, bool> _lanFolderSharing = {};
+
+  /// 本机添加的共享文件夹（来自其他设备，作为播放源）
+  List<SharedFolderRef> _sharedFolders = [];
+
+  /// 本机唯一标识，首次启动时生成并持久化，用于在发现列表中排除自己
+  String _deviceId = '';
+
+  /// 本机在局域网中显示的名称（Android 上为厂商 + 型号）
+  String _deviceName = _fallbackDeviceName();
+
   /// 换片时间的生效值：自定义开关开启时取自定义秒数，否则取滑块档位值
   int get interval => _useCustomInterval ? _customInterval : _interval;
 
@@ -111,6 +130,29 @@ class SettingsProvider extends ChangeNotifier {
   bool get wheelSwitchImage => _wheelSwitchImage;
   DeleteAction get deleteAction => _deleteAction;
   int get languageIndex => _languageIndex;
+
+  /// 是否允许局域网内其他设备浏览/播放本机共享的图片
+  bool get lanShareEnabled => _lanShareEnabled;
+
+  /// 各本地文件夹的共享开关（未记录的文件夹缺省为共享）
+  Map<String, bool> get lanFolderSharing => Map.unmodifiable(_lanFolderSharing);
+
+  bool isLocalFolderShared(String path) => _lanFolderSharing[path] ?? true;
+
+  /// 已添加的共享文件夹（其他设备上的目录）
+  List<SharedFolderRef> get sharedFolders => List.unmodifiable(_sharedFolders);
+
+  /// 本机设备标识（持久化，用于发现列表中排除自己）
+  String get deviceId => _deviceId;
+
+  /// 本机在局域网中显示的名称
+  String get deviceName => _deviceName;
+
+  static String _fallbackDeviceName() {
+    final host = Platform.localHostname.trim();
+    if (host.isEmpty || host == 'localhost') return 'FrameFlow';
+    return host;
+  }
 
   // Setters
   void setPresetInterval(int value) {
@@ -239,6 +281,75 @@ class SettingsProvider extends ChangeNotifier {
     _saveSettings();
   }
 
+  void setLanShareEnabled(bool value) {
+    if (_lanShareEnabled == value) return;
+    _lanShareEnabled = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setLocalFolderShared(String path, bool value) {
+    if ((_lanFolderSharing[path] ?? true) == value) return;
+    _lanFolderSharing[path] = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  /// 批量设置文件夹共享状态（切换整体共享开关时同步下方各文件夹开关）
+  ///
+  /// 合并为一次通知与一次落盘，避免逐个文件夹触发重建。
+  void setAllLocalFoldersShared(Iterable<String> paths, bool value) {
+    var changed = false;
+    for (final path in paths) {
+      if ((_lanFolderSharing[path] ?? true) != value) {
+        _lanFolderSharing[path] = value;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void addSharedFolder(SharedFolderRef ref) {
+    _sharedFolders.removeWhere((item) => item.key == ref.key);
+    _sharedFolders.add(ref);
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void removeSharedFolder(String key) {
+    final before = _sharedFolders.length;
+    _sharedFolders.removeWhere((item) => item.key == key);
+    if (_sharedFolders.length == before) return;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  /// 用最新的连接信息替换同一条共享文件夹记录
+  void updateSharedFolder(SharedFolderRef ref) {
+    final index = _sharedFolders.indexWhere((item) => item.key == ref.key);
+    if (index < 0) return;
+    final current = _sharedFolders[index];
+    if (current.deviceName == ref.deviceName &&
+        current.host == ref.host &&
+        current.port == ref.port &&
+        current.folderName == ref.folderName &&
+        current.imageCount == ref.imageCount) {
+      return;
+    }
+    _sharedFolders[index] = ref;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void clearSharedFolders() {
+    if (_sharedFolders.isEmpty) return;
+    _sharedFolders.clear();
+    notifyListeners();
+    _saveSettings();
+  }
+
   void setCustomInterval(int value) {
     _customInterval = value;
     notifyListeners();
@@ -334,7 +445,77 @@ class SettingsProvider extends ChangeNotifier {
     _customInterval = prefs.getInt('customInterval') ?? 1800000;
     _useCustomInterval = prefs.getBool('useCustomInterval') ?? false;
 
+    _lanShareEnabled = prefs.getBool('lanShareEnabled') ?? false;
+    _lanFolderSharing = {};
+    final lanFolderSharingStr = prefs.getString('lanFolderSharing');
+    if (lanFolderSharingStr != null) {
+      try {
+        final decoded = json.decode(lanFolderSharingStr);
+        if (decoded is Map) {
+          for (final entry in decoded.entries) {
+            if (entry.key is String && entry.value is bool) {
+              _lanFolderSharing[entry.key as String] = entry.value as bool;
+            }
+          }
+        }
+      } catch (_) {
+        // 数据损坏时退回默认值（全部共享）
+      }
+    }
+    _sharedFolders = [];
+    final sharedFoldersStr = prefs.getString('sharedFolders');
+    if (sharedFoldersStr != null) {
+      try {
+        final decoded = json.decode(sharedFoldersStr);
+        if (decoded is List) {
+          for (final entry in decoded) {
+            final ref = SharedFolderRef.fromJson(entry);
+            if (ref != null && !_sharedFolders.any((e) => e.key == ref.key)) {
+              _sharedFolders.add(ref);
+            }
+          }
+        }
+      } catch (_) {
+        // 数据损坏时忽略已添加的共享文件夹
+      }
+    }
+    _deviceId = prefs.getString('deviceId') ?? '';
+    if (_deviceId.isEmpty) {
+      _deviceId = _generateDeviceId();
+      await prefs.setString('deviceId', _deviceId);
+    }
+
+    await _resolveDeviceName();
     notifyListeners();
+  }
+
+  /// 读取真实设备名。
+  ///
+  /// Android 的 [Platform.localHostname] 通常只返回 localhost，
+  /// 这里改用系统提供的厂商与型号，便于在局域网设备列表中区分不同手机。
+  Future<void> _resolveDeviceName() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final info = await DeviceInfoPlugin().androidInfo;
+      final model = info.model.trim();
+      if (model.isEmpty) return;
+      final manufacturer = info.manufacturer.trim();
+      if (manufacturer.isEmpty ||
+          model.toLowerCase().startsWith(manufacturer.toLowerCase())) {
+        _deviceName = model;
+      } else {
+        _deviceName = '$manufacturer $model';
+      }
+    } catch (_) {
+      // 读取失败时保留默认名称
+    }
+  }
+
+  /// 生成一个进程无关的稳定设备标识（基 36 时间戳 + 随机数）
+  static String _generateDeviceId() {
+    final random = Random.secure();
+    final suffix = random.nextInt(0x7fffffff).toRadixString(36);
+    return '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}$suffix';
   }
 
   // 保存设置
@@ -364,5 +545,12 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.setBool('wheelSwitchImage', _wheelSwitchImage);
     await prefs.setString('excludedPaths', json.encode(_excludedPaths));
     await prefs.setInt('imageOrientation', _imageOrientation.index);
+    await prefs.setBool('lanShareEnabled', _lanShareEnabled);
+    await prefs.setString('lanFolderSharing', json.encode(_lanFolderSharing));
+    await prefs.setString(
+      'sharedFolders',
+      json.encode(_sharedFolders.map((item) => item.toJson()).toList()),
+    );
+    await prefs.setString('deviceId', _deviceId);
   }
 }

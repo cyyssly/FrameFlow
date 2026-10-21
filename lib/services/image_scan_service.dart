@@ -84,7 +84,21 @@ class ImageScanService {
   /// 这正是移动端加载明显慢于桌面的主要原因之一。
   static Future<List<double?>> readAspectRatios(List<String> paths) async {
     if (paths.isEmpty) return const [];
-    return await compute(_parseAspectRatiosFromPaths, paths);
+    // 单 isolate 串行读取文件头，图片多时耗时较长。
+    // 拆成多个小块并行处理，显著缩短共享目录分页接口的响应时间。
+    const chunkSize = 150;
+    if (paths.length <= chunkSize) {
+      return await compute(_parseAspectRatiosFromPaths, paths);
+    }
+    final chunks = <List<String>>[];
+    for (var i = 0; i < paths.length; i += chunkSize) {
+      final end = i + chunkSize < paths.length ? i + chunkSize : paths.length;
+      chunks.add(paths.sublist(i, end));
+    }
+    final results = await Future.wait(
+      chunks.map((chunk) => compute(_parseAspectRatiosFromPaths, chunk)),
+    );
+    return [for (final chunk in results) ...chunk];
   }
 
   /// 后台 isolate 入口：逐张只读文件头并解析宽高比。
