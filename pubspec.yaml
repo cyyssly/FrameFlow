@@ -16,7 +16,9 @@ dependencies:
   # 修复了 Windows 上主线程 CoUninitialize 导致的原生崩溃（comdlg32.dll 0xc0000005）。
   # 注意：10.1.1+ 起 Android 实现迁移到 Kotlin，与 AGP 9 存在兼容问题，暂不升级到 10.x。
   file_picker: ^9.0.3
-  shared_preferences: ^2.2.2
+  # 固定版本：2.5.6 起依赖的 shared_preferences_android 2.5.1 迁移到 JNI，
+  # 在 Flutter 3.44.8 的 release 包中启动即报 NoSuchMethodError（表现为白屏）。
+  shared_preferences: 2.5.5
   provider: ^6.1.1
   image: ^4.1.7
   url_launcher: ^6.2.4
@@ -32,6 +34,11 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.3
+
+# 强制 Android 实现停留在 JNI 迁移前的版本：2.5.1 在当前 Flutter 版本下
+# 启动读取设置时会抛 NoSuchMethodError，导致 release 包白屏。
+dependency_overrides:
+  shared_preferences_android: 2.4.27
 
 flutter_launcher_icons:
   android: true

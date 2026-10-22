@@ -20,6 +20,10 @@ permissions:
 
 env:
   FLUTTER_VERSION: '3.44.8'
+  # 与本地 pubspec.lock 中记录的镜像地址保持一致。
+  # 否则 pub get 会因 hosted URL 不同而重新解析依赖，拉取未经验证的最新版本
+  # （例如 shared_preferences_android 2.5.1，会导致 Android 启动白屏）。
+  PUB_HOSTED_URL: 'https://pub.flutter-io.cn'
 
 jobs:
   # 质量门禁：静态分析与单元测试
@@ -36,7 +40,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Analyze
         run: flutter analyze
@@ -113,7 +117,7 @@ jobs:
             -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD"
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build signed release APK
         run: flutter build apk --release
@@ -144,7 +148,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Build release
         run: flutter build windows --release
