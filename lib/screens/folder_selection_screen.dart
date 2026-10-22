@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -247,16 +248,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     );
 
     try {
-      const supportedExtensions = {
-        'jpg',
-        'jpeg',
-        'png',
-        'webp',
-        'bmp',
-        'gif',
-        'tiff',
-        'tif',
-      };
+      const supportedExtensions = {'jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif'};
 
       int imageCount = 0;
       int subfolderCount = 0;
@@ -872,81 +864,49 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
 
   /// 单个文件夹的已排除文件条目
   ///
-  /// 这里不用 [ListTile]：它的标题/副标题按 Material 三行规格从顶部固定偏移
-  /// 排版（baseline 28/48），内容不足三行时会明显偏上。改为固定行高 + Row
-  /// 居中，使两行内容的条目在行内真正垂直居中。
+  /// 与本地 / 共享文件夹共用 [_folderRow]，保证行高与垂直居中完全一致。
   Widget _buildExcludedGroupTile(String folderPath, List<String> paths) {
     final loc = AppLocalizations.of(context);
     final firstPath = paths.first;
-    return SizedBox(
+    return _folderRow(
       key: ValueKey('excluded-group-$folderPath'),
-      height: 88,
-      child: InkWell(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const ExcludedImagesScreen(),
-            ),
-          );
-        },
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: Platform.isAndroid ? 8 : 16,
-            right: Platform.isAndroid ? 0 : 4,
-          ),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SizedBox(
-                  width: 56,
-                  height: 56,
-                  child: _ThumbnailImage(
-                    key: ValueKey('thumb-excluded-$firstPath'),
-                    thumbnailPath: firstPath,
-                    albumPath: firstPath,
-                  ),
-                ),
-              ),
-              SizedBox(width: Platform.isAndroid ? 8 : 16),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      Platform.isAndroid
-                          ? _getLastPathSegment(folderPath)
-                          : folderPath,
-                      style: const TextStyle(fontSize: 14),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      loc.filesCount(paths.length),
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              _actionButton(
-                tooltip: loc.restoreFiles,
-                icon: const Icon(Icons.restore, color: Colors.orange),
-                onPressed: () => _restoreExcludedGroup(paths),
-              ),
-              _actionButton(
-                tooltip: loc.deleteFiles,
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: () => _deleteExcludedGroup(paths),
-              ),
-            ],
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 56,
+          height: 56,
+          child: _ThumbnailImage(
+            key: ValueKey('thumb-excluded-$firstPath'),
+            thumbnailPath: firstPath,
+            albumPath: firstPath,
           ),
         ),
       ),
+      title: Platform.isAndroid ? _getLastPathSegment(folderPath) : folderPath,
+      subtitle: Text(
+        loc.filesCount(paths.length),
+        style: const TextStyle(fontSize: 12, color: Colors.grey),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      actions: [
+        _actionButton(
+          tooltip: loc.restoreFiles,
+          icon: const Icon(Icons.restore, color: Colors.orange),
+          onPressed: () => _restoreExcludedGroup(paths),
+        ),
+        _actionButton(
+          tooltip: loc.deleteFiles,
+          icon: const Icon(Icons.delete_outline, color: Colors.red),
+          onPressed: () => _deleteExcludedGroup(paths),
+        ),
+      ],
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const ExcludedImagesScreen()),
+        );
+      },
     );
   }
 
@@ -1143,6 +1103,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
 
   bool _previousRecursiveScan = false;
 
+  /// 断线共享文件夹的自动重连定时器与已尝试次数
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+
   @override
   void initState() {
     super.initState();
@@ -1198,10 +1162,53 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     await lan.probeSharedDevices(refs);
     if (!mounted) return;
     lan.loadSharedFolderCovers(refs);
+    _startSharedReconnectCycle();
+  }
+
+  /// 启动一轮自动重连（页面每次进入/返回时重新计时）
+  void _startSharedReconnectCycle() {
+    _reconnectTimer?.cancel();
+    _reconnectAttempt = 0;
+    _attemptSharedReconnect();
+  }
+
+  /// 对离线共享文件夹按 2s / 5s / 10s 退避重试，最多 3 次。
+  ///
+  /// 重连成功（设备恢复在线）后下一轮会因没有离线项而自然停止。
+  void _attemptSharedReconnect() {
+    if (!mounted) return;
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    final lan = Provider.of<LanProvider>(context, listen: false);
+    final offline = settings.sharedFolders
+        .where((ref) => !lan.isDeviceReachable(ref.deviceId))
+        .toList();
+    if (offline.isEmpty) {
+      _reconnectAttempt = 0;
+      return;
+    }
+    if (_reconnectAttempt >= 3) return;
+
+    const delays = [
+      Duration(seconds: 2),
+      Duration(seconds: 5),
+      Duration(seconds: 10),
+    ];
+    final delay = delays[_reconnectAttempt];
+    _reconnectAttempt++;
+    _reconnectTimer = Timer(delay, () async {
+      if (!mounted) return;
+      await lan.probeSharedDevices(offline);
+      if (!mounted) return;
+      // 静默刷新，不弹失败提示，避免自动重试打扰用户
+      await lan.refreshSharedFolders(offline);
+      if (!mounted) return;
+      _attemptSharedReconnect();
+    });
   }
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
     appRouteObserver.unsubscribe(this);
     HardwareKeyboard.instance.removeHandler(_hardwareKeyHandler);
     super.dispose();
@@ -1389,12 +1396,57 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     );
   }
 
-  /// 统一三类文件夹条目的行高。
+  /// 统一的文件夹条目布局：固定 88dp 行高 + 内容垂直居中。
   ///
-  /// 两行文字的条目（已排除文件）与三行文字的条目（本地/共享文件夹）
-  /// 仅靠 `isThreeLine` 无法保证高度一致，这里直接用固定高度约束，
-  /// 使所有条目都占满 Material 三行条目的标准高度。
-  Widget _folderRow(Widget tile) => SizedBox(height: 88, child: tile);
+  /// [ListTile] 的标题/副标题按 Material 三行规格从顶部固定偏移排版，
+  /// 内容不足三行时会明显偏上；这里改用 Row 自行布局，保证缩略图、
+  /// 文本块与操作按钮始终在行内居中，三类条目的高度与对齐完全一致。
+  Widget _folderRow({
+    required Key key,
+    required Widget leading,
+    required String title,
+    required Widget subtitle,
+    required List<Widget> actions,
+    Color? titleColor,
+    VoidCallback? onTap,
+  }) {
+    return SizedBox(
+      key: key,
+      height: 88,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: Platform.isAndroid ? 8 : 16,
+            right: Platform.isAndroid ? 0 : 4,
+          ),
+          child: Row(
+            children: [
+              leading,
+              SizedBox(width: Platform.isAndroid ? 8 : 16),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(fontSize: 14, color: titleColor),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    subtitle,
+                  ],
+                ),
+              ),
+              ...actions,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   /// 行内操作按钮：移动端压缩内边距与占位宽度，桌面端保持默认尺寸
   Widget _actionButton({
@@ -1457,91 +1509,68 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
         ? lan.localAddresses.first
         : '127.0.0.1';
     return _folderRow(
-      ListTile(
-        // 使用稳定的 Key 绑定到文件夹路径，避免 ListView 按位置复用 State，
-        // 导致缩略图组件残留上一个位置的图片
-        key: ValueKey('folder-$path'),
-        isThreeLine: true,
-        // 三行内容默认会把左右部件顶对齐，显式改为居中，
-        // 让缩略图与右侧按钮都在行内竖向居中
-        titleAlignment: ListTileTitleAlignment.center,
-        // 桌面端 ThemeData 会使用 compact 密度，把 leading 最大高度压到 48dp，
-        // 导致 56dp 的缩略图被拉成横向长方形；这里固定为标准密度保证正方形
-        visualDensity: VisualDensity.standard,
-        // 手机端压缩左右边距与标题间距，为文本和按钮留出横向空间
-        contentPadding: EdgeInsets.only(
-          left: Platform.isAndroid ? 8 : 16,
-          right: Platform.isAndroid ? 0 : 4,
-        ),
-        horizontalTitleGap: Platform.isAndroid ? 8 : 16,
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox(
-            // 与三行文字的总体高度对齐
-            width: 56,
-            height: 56,
-            child: _ThumbnailImage(
-              // 排除列表变化时重建，避免沿用排除前缓存的封面
-              key: ValueKey('thumb-$path-${settings.excludedPaths.length}'),
-              thumbnailPath: null,
-              albumPath: path,
-            ),
+      // 使用稳定的 Key 绑定到文件夹路径，避免 ListView 按位置复用 State，
+      // 导致缩略图组件残留上一个位置的图片
+      key: ValueKey('folder-$path'),
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 56,
+          height: 56,
+          child: _ThumbnailImage(
+            // 排除列表变化时重建，避免沿用排除前缓存的封面
+            key: ValueKey('thumb-$path-${settings.excludedPaths.length}'),
+            thumbnailPath: null,
+            albumPath: path,
           ),
         ),
-        title: Text(
-          // 安卓端手机宽度有限，只显示最后一级文件夹名；Windows 端保留完整路径
-          Platform.isAndroid ? _getLastPathSegment(path) : path,
-          style: const TextStyle(fontSize: 14),
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildFolderStats(path),
-            const SizedBox(height: 2),
-            Text(
-              '${settings.deviceName} · $ip',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-        // 播放：直接以该文件夹为范围进入幻灯；
-        // 排除：把该文件夹移出播放列表（原「删除」按钮的动作）
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _actionButton(
-              tooltip: AppLocalizations.of(context).playFolder,
-              icon: _playingFolders.contains(path)
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.play_circle_outline, color: Colors.green),
-              onPressed: _playingFolders.contains(path)
-                  ? null
-                  : () => _playFolder(path),
-            ),
-            _actionButton(
-              tooltip: AppLocalizations.of(context).excludeFromPlay,
-              icon: const Icon(Icons.block, color: Colors.orange),
-              onPressed: () => _removeFolder(path),
-            ),
-          ],
-        ),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => FolderImagesScreen(folderPath: path),
-            ),
-          );
-        },
       ),
+      // 安卓端手机宽度有限，只显示最后一级文件夹名；Windows 端保留完整路径
+      title: Platform.isAndroid ? _getLastPathSegment(path) : path,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildFolderStats(path),
+          const SizedBox(height: 2),
+          Text(
+            '${settings.deviceName} · $ip',
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+      // 播放：直接以该文件夹为范围进入幻灯；
+      // 排除：把该文件夹移出播放列表（原「删除」按钮的动作）
+      actions: [
+        _actionButton(
+          tooltip: AppLocalizations.of(context).playFolder,
+          icon: _playingFolders.contains(path)
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.play_circle_outline, color: Colors.green),
+          onPressed: _playingFolders.contains(path)
+              ? null
+              : () => _playFolder(path),
+        ),
+        _actionButton(
+          tooltip: AppLocalizations.of(context).excludeFromPlay,
+          icon: const Icon(Icons.block, color: Colors.orange),
+          onPressed: () => _removeFolder(path),
+        ),
+      ],
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => FolderImagesScreen(folderPath: path),
+          ),
+        );
+      },
     );
   }
 
@@ -1565,125 +1594,102 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     final coverFile = lan.coverFileFor(ref.key);
     final coverUrl = lan.coverUrlFor(ref.key);
     return _folderRow(
-      ListTile(
-        key: ValueKey('shared-${ref.key}'),
-        isThreeLine: true,
-        titleAlignment: ListTileTitleAlignment.center,
-        // 与本地文件夹行保持一致，避免桌面 compact 密度压缩图标占位高度
-        visualDensity: VisualDensity.standard,
-        contentPadding: EdgeInsets.only(
-          left: Platform.isAndroid ? 8 : 16,
-          right: Platform.isAndroid ? 0 : 4,
-        ),
-        horizontalTitleGap: Platform.isAndroid ? 8 : 16,
-        // 固定与本地缩略图相同的占位宽度，保证两类条目的文字左边缘对齐
-        leading: SizedBox(
-          width: 56,
-          height: 56,
-          child: coverFile != null
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.file(
-                    File(coverFile),
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        _sharedFolderIcon(online),
-                  ),
-                )
-              : coverUrl == null
-              ? _sharedFolderIcon(online)
-              : ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    coverUrl,
-                    fit: BoxFit.cover,
-                    // 加载期间先显示文件夹图标，避免出现空白占位
-                    frameBuilder:
-                        (context, child, frame, wasSynchronouslyLoaded) {
-                          if (wasSynchronouslyLoaded || frame != null) {
-                            return child;
-                          }
-                          return _sharedFolderIcon(online);
-                        },
-                    errorBuilder: (context, error, stackTrace) =>
-                        _sharedFolderIcon(online),
-                  ),
+      key: ValueKey('shared-${ref.key}'),
+      // 固定与本地缩略图相同的占位宽度，保证两类条目的文字左边缘对齐
+      leading: SizedBox(
+        width: 56,
+        height: 56,
+        child: coverFile != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.file(
+                  File(coverFile),
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                      _sharedFolderIcon(online),
                 ),
-        ),
-        title: Text(
-          ref.folderName,
-          style: TextStyle(
-            fontSize: 14,
-            color: online ? Colors.white : Colors.grey,
-          ),
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              loc.filesCount(ref.imageCount),
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '$deviceName · $address',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 在线时只显示播放，离线时只显示重连
-            if (!online)
-              _actionButton(
-                tooltip: loc.lanReconnectFolder,
-                icon: _refreshingShared.contains(ref.key)
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.refresh),
-                onPressed: () => _refreshSharedFolder(ref),
+              )
+            : coverUrl == null
+            ? _sharedFolderIcon(online)
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  coverUrl,
+                  fit: BoxFit.cover,
+                  // 加载期间先显示文件夹图标，避免出现空白占位
+                  frameBuilder:
+                      (context, child, frame, wasSynchronouslyLoaded) {
+                        if (wasSynchronouslyLoaded || frame != null) {
+                          return child;
+                        }
+                        return _sharedFolderIcon(online);
+                      },
+                  errorBuilder: (context, error, stackTrace) =>
+                      _sharedFolderIcon(online),
+                ),
               ),
-            if (online)
-              _actionButton(
-                tooltip: loc.playFolder,
-                icon: _playingShared.contains(ref.key)
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(
-                        Icons.play_circle_outline,
-                        color: Colors.green,
-                      ),
-                onPressed: _playingShared.contains(ref.key)
-                    ? null
-                    : () => _playSharedFolder(ref),
-              ),
-            _actionButton(
-              tooltip: loc.excludeFromPlay,
-              icon: const Icon(Icons.block, color: Colors.orange),
-              onPressed: () {
-                Provider.of<SettingsProvider>(
-                  context,
-                  listen: false,
-                ).removeSharedFolder(ref.key);
-              },
-            ),
-          ],
-        ),
-        onTap: online ? () => _openSharedImages(ref) : null,
       ),
+      title: ref.folderName,
+      titleColor: online ? Colors.white : Colors.grey,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            loc.filesCount(ref.imageCount),
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '$deviceName · $address',
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+      actions: [
+        // 在线时只显示播放，离线时只显示重连
+        if (!online)
+          _actionButton(
+            tooltip: loc.lanReconnectFolder,
+            icon: _refreshingShared.contains(ref.key)
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: () => _refreshSharedFolder(ref),
+          ),
+        if (online)
+          _actionButton(
+            tooltip: loc.playFolder,
+            icon: _playingShared.contains(ref.key)
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.play_circle_outline, color: Colors.green),
+            onPressed: _playingShared.contains(ref.key)
+                ? null
+                : () => _playSharedFolder(ref),
+          ),
+        _actionButton(
+          tooltip: loc.excludeFromPlay,
+          icon: const Icon(Icons.block, color: Colors.orange),
+          onPressed: () {
+            Provider.of<SettingsProvider>(
+              context,
+              listen: false,
+            ).removeSharedFolder(ref.key);
+          },
+        ),
+      ],
+      onTap: online ? () => _openSharedImages(ref) : null,
     );
   }
 
@@ -1821,8 +1827,6 @@ class _ThumbnailImageState extends State<_ThumbnailImage> {
     'webp',
     'bmp',
     'gif',
-    'tiff',
-    'tif',
   };
 
   @override

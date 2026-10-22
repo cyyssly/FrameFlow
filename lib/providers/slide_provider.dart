@@ -229,6 +229,12 @@ class SlideProvider extends ChangeNotifier {
         case PlayOrder.oldestFirst:
           insertIndex = _findInsertIndexByTime(image, newestFirst: false);
           break;
+        case PlayOrder.sizeLargest:
+          insertIndex = _findInsertIndexBySize(image, largestFirst: true);
+          break;
+        case PlayOrder.sizeSmallest:
+          insertIndex = _findInsertIndexBySize(image, largestFirst: false);
+          break;
         case PlayOrder.random:
           insertIndex = _images.length;
           break;
@@ -320,6 +326,45 @@ class SlideProvider extends ChangeNotifier {
     return low;
   }
 
+  /// 二分查找按文件大小的插入位置
+  /// [largestFirst] = true: 由大到小（降序），false: 由小到大（升序）
+  int _findInsertIndexBySize(ImageItem image, {required bool largestFirst}) {
+    int low = 0, high = _images.length;
+    while (low < high) {
+      final mid = (low + high) ~/ 2;
+      if (_compareBySize(_images[mid], image, largestFirst: largestFirst) <=
+          0) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }
+
+  /// 读取图片大小：远端图片直接使用其提供的值，本地图片回退到文件系统。
+  static int _sizeOf(ImageItem item) {
+    final known = item.size;
+    if (known != null) return known;
+    if (item.path.isEmpty) return 0;
+    try {
+      return File(item.path).lengthSync();
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 按文件大小比较
+  static int _compareBySize(
+    ImageItem a,
+    ImageItem b, {
+    required bool largestFirst,
+  }) {
+    final aSize = _sizeOf(a);
+    final bSize = _sizeOf(b);
+    return largestFirst ? bSize.compareTo(aSize) : aSize.compareTo(bSize);
+  }
+
   /// 读取图片修改时间：远端图片直接使用其提供的值，本地图片回退到文件系统。
   static DateTime? _modifiedTime(ImageItem item) {
     if (item.modifiedAt != null) return item.modifiedAt;
@@ -345,6 +390,31 @@ class SlideProvider extends ChangeNotifier {
     return newestFirst ? bTime.compareTo(aTime) : aTime.compareTo(bTime);
   }
 
+  /// 新图优先排序：先按修改时间从新到旧，再做加权随机重排，
+  /// 越新的图片偏移范围越小，因此更大概率保留在靠前位置。
+  ///
+  /// 瀑布流页面与播放顺序共用该逻辑，保证两边看到的新图优先顺序一致。
+  static void applyNewPreferredOrder(List<ImageItem> items) {
+    if (items.length < 2) return;
+    items.sort((a, b) => _compareByModifiedTime(a, b, newestFirst: true));
+    final rng = Random();
+    for (int i = 0; i < items.length; i++) {
+      final progress = i / items.length; // 0~1
+      // 偏移范围：前部30% → 后部90%，逐步增大
+      final rangeRatio = 0.3 + progress * 0.6;
+      final maxOffset = (items.length * rangeRatio).ceil().clamp(
+        1,
+        items.length - i,
+      );
+      final j = i + rng.nextInt(maxOffset);
+      if (j < items.length) {
+        final temp = items[i];
+        items[i] = items[j];
+        items[j] = temp;
+      }
+    }
+  }
+
   /// 根据播放顺序模式对图片列表进行排序
   void sortByPlayOrder(PlayOrder order) {
     switch (order) {
@@ -366,30 +436,19 @@ class SlideProvider extends ChangeNotifier {
           (a, b) => _compareByModifiedTime(a, b, newestFirst: false),
         );
         break;
+      case PlayOrder.sizeLargest:
+        // 按文件大小从大到小
+        _images.sort((a, b) => _compareBySize(a, b, largestFirst: true));
+        break;
+      case PlayOrder.sizeSmallest:
+        // 按文件大小从小到大
+        _images.sort((a, b) => _compareBySize(a, b, largestFirst: false));
+        break;
       case PlayOrder.random:
         // 随机模式不排序图片本身，使用 `_randomOrder` 序列
         break;
       case PlayOrder.newPreferred:
-        // 新图优先：加权随机重排，新图有更高概率放在前面
-        // 1. 先按修改时间从新到旧排序
-        _images.sort((a, b) => _compareByModifiedTime(a, b, newestFirst: true));
-        // 2. 加权随机打乱：越新的图偏移越小，保留靠前位置
-        final rng = Random();
-        for (int i = 0; i < _images.length; i++) {
-          final progress = i / _images.length; // 0~1
-          // 偏移范围：前部30% → 后部90%，逐步增大
-          final rangeRatio = 0.3 + progress * 0.6;
-          final maxOffset = (_images.length * rangeRatio).ceil().clamp(
-            1,
-            _images.length - i,
-          );
-          final j = i + rng.nextInt(maxOffset);
-          if (j < _images.length) {
-            final temp = _images[i];
-            _images[i] = _images[j];
-            _images[j] = temp;
-          }
-        }
+        applyNewPreferredOrder(_images);
         break;
     }
     _currentIndex = 0;

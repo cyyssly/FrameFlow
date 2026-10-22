@@ -5,7 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 /// 展示用版本号（与 pubspec.yaml 的 version 保持一致，改版本时需同步）
-const String appVersionLabel = 'V1.5.1';
+const String appVersionLabel = 'V1.5.2';
 
 /// 帮助页：说明文档 / 关于 / 赞助
 ///

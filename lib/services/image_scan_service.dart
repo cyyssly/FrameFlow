@@ -14,8 +14,6 @@ class ImageScanService {
     'webp',
     'bmp',
     'gif',
-    'tiff',
-    'tif',
   };
 
   /// 扫描文件夹中的图片（Android 走 MediaStore，桌面走文件系统）
@@ -87,8 +85,8 @@ class ImageScanService {
 
   /// 头部解析失败时的回退上限。
   ///
-  /// TIFF 的尺寸信息可能位于文件末尾的 IFD，无法只靠文件头解析；
-  /// 这类格式较为罕见，仅在其体积不超过该上限时才退回整文件读取，
+  /// 少数图片的尺寸信息不在文件头附近，无法只靠文件头解析；
+  /// 仅在其体积不超过该上限时才退回整文件读取，
   /// 避免为个别文件付出读取几十 MB 的代价。
   static const int _wholeFileFallbackLimit = 8 * 1024 * 1024;
 
@@ -141,7 +139,7 @@ class ImageScanService {
 
       var ratio = _tryParseRatio(file, readLength);
 
-      // 头部不足以解析（如 TIFF 的尺寸在文件尾部）时，对中小文件整读一次
+      // 头部不足以解析（尺寸信息不在文件头附近）时，对中小文件整读一次
       if (ratio == null && fileLength > readLength) {
         if (fileLength <= _wholeFileFallbackLimit) {
           ratio = _tryParseRatio(file, fileLength);

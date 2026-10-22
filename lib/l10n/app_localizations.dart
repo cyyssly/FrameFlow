@@ -106,6 +106,8 @@ class AppLocalizations {
   String get randomPlay => _t('随机播放', 'Random', '隨機播放');
   String get newestFirst => _t('由新到旧', 'Newest First', '由新到舊');
   String get oldestFirst => _t('由旧到新', 'Oldest First', '由舊到新');
+  String get largestFirst => _t('由大到小', 'Largest First', '由大到小');
+  String get smallestFirst => _t('由小到大', 'Smallest First', '由小到大');
   String get newPreferred => _t('新图优先', 'New Preferred', '新圖優先');
   String get loopPlay => _t('循环播放', 'Loop', '循環播放');
   String get loopPlayDesc =>
@@ -280,6 +282,10 @@ class AppLocalizations {
   String get moveFailed => _t('移动失败', 'Move failed', '移動失敗');
   String get copyFailed => _t('复制失败', 'Copy failed', '複製失敗');
   String get copySuccess => _t('复制成功', 'Copied', '複製成功');
+  String get lastCopyDestination => _t('上次使用的目录', 'Last Folder', '上次使用的目錄');
+  String get changeDestination => _t('更换目录', 'Change Folder', '更換目錄');
+  String get startCopy => _t('开始复制', 'Start Copy', '開始複製');
+  String get copyCancelled => _t('已取消复制', 'Copy cancelled', '已取消複製');
   String copyingFiles(int done, int total) =>
       _t('正在复制 $done/$total', 'Copying $done/$total', '正在複製 $done/$total');
   String get deletedToTrash => _t('已移入回收站', 'Moved to trash', '已移入回收站');
@@ -310,9 +316,9 @@ class AppLocalizations {
       _t('全屏与工具栏', 'Fullscreen & Toolbar', '全屏與工具欄');
   String get helpGroupFolders => _t('多目录与图片管理', 'Folders & Images', '多目錄與圖片管理');
   String get helpPlayOrder => _t(
-    '多种播放顺序：顺序、逆序、由新到旧、由旧到新、随机、新图优先',
-    'Play orders: ascending, descending, newest first, oldest first, random, new-first',
-    '多種播放順序：順序、逆序、由新到舊、由舊到新、隨機、新圖優先',
+    '多种播放顺序：顺序、逆序、由新到旧、由旧到新、由大到小、由小到大、随机、新图优先',
+    'Play orders: ascending, descending, newest first, oldest first, largest first, smallest first, random, new-first',
+    '多種播放順序：順序、逆序、由新到舊、由舊到新、由大到小、由小到大、隨機、新圖優先',
   );
   String get helpLoopAuto => _t(
     '循环播放与自动播放可分别开关',
@@ -377,9 +383,9 @@ class AppLocalizations {
     '可添加多個文件夾，可選擇是否包含子文件夾，自動去重並統計數量',
   );
   String get helpFormats => _t(
-    '支持 JPG、JPEG、PNG、WebP、BMP、GIF、TIFF 等常见格式',
-    'Supports JPG, JPEG, PNG, WebP, BMP, GIF, TIFF and more',
-    '支援 JPG、JPEG、PNG、WebP、BMP、GIF、TIFF 等常見格式',
+    '支持 JPG、JPEG、PNG、WebP、BMP、GIF 等常见格式',
+    'Supports JPG, JPEG, PNG, WebP, BMP, GIF and more',
+    '支援 JPG、JPEG、PNG、WebP、BMP、GIF 等常見格式',
   );
   String get helpExclude => _t(
     '排除播放：把不想看的图片移出播放列表（不删除文件），已排除的图片可恢复或实际删除，也可以移动或者复制到其他位置；排除结果会保留，重新进入文件夹或重新播放时不再出现',
@@ -392,9 +398,9 @@ class AppLocalizations {
     '瀑布流瀏覽：點擊任意圖片或點擊右上角播放按鈕，即可按當前文件夾排序播放幻燈',
   );
   String get helpSort => _t(
-    '瀑布流右上角提供顺序、逆序、最新、最旧、最大、最小、随机 7 种排序，本地与共享文件夹一致',
-    'The grid sort menu offers ascending, descending, newest, oldest, largest, smallest and random, for both local and shared folders',
-    '瀑布流右上角提供順序、逆序、最新、最舊、最大、最小、隨機 7 種排序，本地與共享文件夾一致',
+    '瀑布流右上角提供顺序、逆序、最新、最旧、最大、最小、随机、新图优先 8 种排序，本地与共享文件夹一致；未手动选择时默认跟随设置页的播放顺序',
+    'The grid sort menu offers ascending, descending, newest, oldest, largest, smallest, random and new-first, for both local and shared folders; until you pick one, it follows the play order from settings',
+    '瀑布流右上角提供順序、逆序、最新、最舊、最大、最小、隨機、新圖優先 8 種排序，本地與共享文件夾一致；未手動選擇時默認跟隨設定頁的播放順序',
   );
   String get helpWaterfallPlay => _t(
     '从瀑布流进入播放时按当前排序顺序播放；从其他入口进入则按设置页的播放顺序',

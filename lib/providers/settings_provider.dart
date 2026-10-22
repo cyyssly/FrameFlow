@@ -18,6 +18,8 @@ enum PlayOrder {
   oldestFirst,
   newPreferred,
   reverseSequential, // 逆序播放（按文件名降序）
+  sizeLargest, // 由大到小（按文件大小降序）
+  sizeSmallest, // 由小到大（按文件大小升序）
 }
 
 enum ImageFitMode { contain, cover, original }
@@ -77,6 +79,15 @@ class SettingsProvider extends ChangeNotifier {
   DeleteAction _deleteAction = DeleteAction.exclude;
   List<String> _excludedPaths = [];
 
+  /// 本地文件夹的瀑布流排序方式（路径 → 排序 id）
+  Map<String, String> _localSortModes = {};
+
+  /// 共享文件夹的瀑布流排序方式（共享文件夹 key → 排序 id）
+  Map<String, String> _sharedSortModes = {};
+
+  /// 上次复制文件时使用的目标目录（Android 为 SAF URI，桌面为本地路径）
+  String? _lastCopyDestination;
+
   // 语言设置（0=跟随系统, 1=简体中文, 2=English, 3=繁體中文）
   int _languageIndex = 0;
 
@@ -109,6 +120,15 @@ class SettingsProvider extends ChangeNotifier {
   int get customInterval => _customInterval;
   bool get useCustomInterval => _useCustomInterval;
   List<String> get excludedPaths => List.unmodifiable(_excludedPaths);
+
+  /// 读取某个本地文件夹上次使用的排序方式；未记录时返回 null（默认顺序）
+  String? localSortFor(String folderPath) => _localSortModes[folderPath];
+
+  /// 读取某个共享文件夹上次使用的排序方式；未记录时返回 null（默认顺序）
+  String? sharedSortFor(String folderKey) => _sharedSortModes[folderKey];
+
+  /// 上次复制文件的目标目录
+  String? get lastCopyDestination => _lastCopyDestination;
   PlayOrder get playOrder => _playOrder;
   bool get loopPlay => _loopPlay;
   bool get autoPlay => _autoPlay;
@@ -376,6 +396,27 @@ class SettingsProvider extends ChangeNotifier {
     _saveSettings();
   }
 
+  /// 记住某个本地文件夹的瀑布流排序方式
+  void setLocalSort(String folderPath, String sortId) {
+    if (_localSortModes[folderPath] == sortId) return;
+    _localSortModes[folderPath] = sortId;
+    _saveSettings();
+  }
+
+  /// 记住某个共享文件夹的瀑布流排序方式
+  void setSharedSort(String folderKey, String sortId) {
+    if (_sharedSortModes[folderKey] == sortId) return;
+    _sharedSortModes[folderKey] = sortId;
+    _saveSettings();
+  }
+
+  /// 记住上次复制文件的目标目录
+  void setLastCopyDestination(String destination) {
+    if (_lastCopyDestination == destination) return;
+    _lastCopyDestination = destination;
+    _saveSettings();
+  }
+
   // 获取BoxFit枚举
   BoxFit get boxFit {
     switch (_imageFitMode) {
@@ -436,6 +477,10 @@ class SettingsProvider extends ChangeNotifier {
     if (excludedStr != null) {
       _excludedPaths = json.decode(excludedStr).cast<String>();
     }
+
+    _localSortModes = _decodeStringMap(prefs.getString('localSortModes'));
+    _sharedSortModes = _decodeStringMap(prefs.getString('sharedSortModes'));
+    _lastCopyDestination = prefs.getString('lastCopyDestination');
 
     _wheelSwitchImage = prefs.getBool('wheelSwitchImage') ?? true;
     _deleteAction = DeleteAction.values[prefs.getInt('deleteAction') ?? 0];
@@ -511,6 +556,24 @@ class SettingsProvider extends ChangeNotifier {
     }
   }
 
+  /// 解析存储为 JSON 的「字符串 → 字符串」映射，数据损坏时返回空表
+  static Map<String, String> _decodeStringMap(String? raw) {
+    if (raw == null) return {};
+    try {
+      final decoded = json.decode(raw);
+      if (decoded is Map) {
+        return {
+          for (final entry in decoded.entries)
+            if (entry.key is String && entry.value is String)
+              entry.key as String: entry.value as String,
+        };
+      }
+    } catch (_) {
+      // 数据损坏时退回空表
+    }
+    return {};
+  }
+
   /// 生成一个进程无关的稳定设备标识（基 36 时间戳 + 随机数）
   static String _generateDeviceId() {
     final random = Random.secure();
@@ -544,6 +607,13 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.setBool('useCustomInterval', _useCustomInterval);
     await prefs.setBool('wheelSwitchImage', _wheelSwitchImage);
     await prefs.setString('excludedPaths', json.encode(_excludedPaths));
+    await prefs.setString('localSortModes', json.encode(_localSortModes));
+    await prefs.setString('sharedSortModes', json.encode(_sharedSortModes));
+    if (_lastCopyDestination != null) {
+      await prefs.setString('lastCopyDestination', _lastCopyDestination!);
+    } else {
+      await prefs.remove('lastCopyDestination');
+    }
     await prefs.setInt('imageOrientation', _imageOrientation.index);
     await prefs.setBool('lanShareEnabled', _lanShareEnabled);
     await prefs.setString('lanFolderSharing', json.encode(_lanFolderSharing));

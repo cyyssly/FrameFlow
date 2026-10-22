@@ -23,6 +23,7 @@ enum _SortAction {
   sizeLargest,
   sizeSmallest,
   random,
+  newPreferred,
 }
 
 /// 文件夹图片瀑布流浏览页
@@ -66,8 +67,46 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   @override
   void initState() {
     super.initState();
+    _restoreSortMode();
     _loadImages();
     HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
+  }
+
+  /// 恢复该文件夹上次使用的排序方式；用户未选择过时跟随设置页的播放顺序
+  void _restoreSortMode() {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    final saved = settings.localSortFor(widget.folderPath);
+    if (saved != null) {
+      for (final action in _SortAction.values) {
+        if (action.name == saved) {
+          _sortAction = action;
+          return;
+        }
+      }
+    }
+    _sortAction = _actionForPlayOrder(settings.playOrder);
+  }
+
+  /// 设置页播放顺序 → 瀑布流排序方式的映射
+  static _SortAction _actionForPlayOrder(PlayOrder order) {
+    switch (order) {
+      case PlayOrder.sequential:
+        return _SortAction.nameAsc;
+      case PlayOrder.reverseSequential:
+        return _SortAction.nameDesc;
+      case PlayOrder.newestFirst:
+        return _SortAction.timeNewest;
+      case PlayOrder.oldestFirst:
+        return _SortAction.timeOldest;
+      case PlayOrder.sizeLargest:
+        return _SortAction.sizeLargest;
+      case PlayOrder.sizeSmallest:
+        return _SortAction.sizeSmallest;
+      case PlayOrder.random:
+        return _SortAction.random;
+      case PlayOrder.newPreferred:
+        return _SortAction.newPreferred;
+    }
   }
 
   @override
@@ -253,6 +292,8 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
         _allItems.sort((a, b) => _sizeOf(a).compareTo(_sizeOf(b)));
       case _SortAction.random:
         _allItems.shuffle();
+      case _SortAction.newPreferred:
+        SlideProvider.applyNewPreferredOrder(_allItems);
     }
   }
 
@@ -288,9 +329,13 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     unawaited(_bootstrapBatches());
   }
 
-  /// 应用菜单中选中的排序方式
+  /// 应用菜单中选中的排序方式，并记住该文件夹的选择
   void _applySort(_SortAction action) {
     _sortAction = action;
+    Provider.of<SettingsProvider>(
+      context,
+      listen: false,
+    ).setLocalSort(widget.folderPath, action.name);
     _resort();
   }
 
@@ -320,7 +365,7 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     );
   }
 
-  /// 排序入口：用一个按钮弹出 7 种排序方式，避免占用过多标题栏空间
+  /// 排序入口：用一个按钮弹出 8 种排序方式，避免占用过多标题栏空间
   Widget _buildSortMenu(AppLocalizations loc) {
     return PopupMenuButton<_SortAction>(
       tooltip: loc.sortBy,
@@ -363,6 +408,11 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
           action: _SortAction.random,
           label: loc.sortRandom,
           iconBuilder: (color) => Icon(Icons.shuffle, color: color),
+        ),
+        _sortMenuItem(
+          action: _SortAction.newPreferred,
+          label: loc.newPreferred,
+          iconBuilder: (color) => Icon(Icons.fiber_new, color: color),
         ),
       ],
     );

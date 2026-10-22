@@ -218,16 +218,7 @@ foreach (\$p in \$paths) {
       '/storage/emulated/0/Ringtones',
     ];
 
-    const supportedExtensions = {
-      'jpg',
-      'jpeg',
-      'png',
-      'webp',
-      'bmp',
-      'gif',
-      'tiff',
-      'tif',
-    };
+    const supportedExtensions = {'jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif'};
 
     final albums = <AlbumInfo>[];
 

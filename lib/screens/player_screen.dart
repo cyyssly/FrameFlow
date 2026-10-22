@@ -11,6 +11,7 @@ import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
+import 'package:frame_flow/services/copy_service.dart';
 import 'package:frame_flow/services/fullscreen_service.dart';
 import 'package:frame_flow/utils/rotated_fit.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
@@ -361,6 +362,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _showDeleteConfirmationDialog(action);
   }
 
+  /// 复制当前远端图片到本机（共享文件夹播放页右上角按钮）
+  Future<void> _copyCurrentImage() async {
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    if (slideProvider.images.isEmpty) return;
+    final item = slideProvider.images[slideProvider.currentIndex];
+    if (!item.isRemote) return;
+
+    final destination = await CopyService.resolveDestination(context);
+    if (!mounted || destination == null) return;
+
+    final ok = await CopyService.copyRemoteImage(item, destination);
+    if (!mounted) return;
+    final loc = AppLocalizations.of(context);
+    _showDeleteNotification(ok ? loc.copySuccess : loc.copyFailed);
+  }
+
   /// 计算本次实际使用的删除行为：[invert] 为 true 时取与设置相反的一项。
   DeleteAction _effectiveDeleteAction(SettingsProvider settings, bool invert) {
     if (!invert) return settings.deleteAction;
@@ -521,13 +538,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // 从瀑布流进入时按列表既有顺序（即其当前排序）播放，忽略设置页的随机模式
     final followListOrder = slideProvider.followListOrder;
     if (!settings.loopPlay) {
-      // 顺序/最新/最旧模式：检查是否到达最后一张图片
+      // 顺序/时间/大小/新图优先模式：检查是否到达最后一张图片
       final isSequentialOrder =
           followListOrder ||
           settings.playOrder == PlayOrder.sequential ||
           settings.playOrder == PlayOrder.reverseSequential ||
           settings.playOrder == PlayOrder.newestFirst ||
-          settings.playOrder == PlayOrder.oldestFirst;
+          settings.playOrder == PlayOrder.oldestFirst ||
+          settings.playOrder == PlayOrder.sizeLargest ||
+          settings.playOrder == PlayOrder.sizeSmallest ||
+          settings.playOrder == PlayOrder.newPreferred;
       if (isSequentialOrder &&
           slideProvider.currentIndex == slideProvider.images.length - 1) {
         slideProvider.stopPlay();
@@ -1141,13 +1161,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _intrinsicListener = null;
   }
 
-  /// 本地图片读取文件，远端图片走网络地址
-  static ImageProvider _imageProviderFor(ImageItem item) {
+  /// 本地图片读取文件，远端图片走网络地址。
+  ///
+  /// 「原图大小」模式需要保持原始像素，因此不做降采样；其余模式按视口
+  /// 尺寸限制解码分辨率，避免超大图在 contain/cover 下也解码出上百 MB 位图。
+  ImageProvider _imageProviderFor(ImageItem item) {
     final url = item.remoteUrl;
-    if (item.isRemote && url != null && url.isNotEmpty) {
-      return NetworkImage(url);
-    }
-    return FileImage(File(item.path));
+    final ImageProvider provider =
+        item.isRemote && url != null && url.isNotEmpty
+        ? NetworkImage(url)
+        : FileImage(File(item.path));
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    if (settings.imageFitMode == ImageFitMode.original) return provider;
+
+    final media = MediaQuery.of(context);
+    final cap =
+        (math.max(media.size.width, media.size.height) *
+                media.devicePixelRatio *
+                2)
+            .clamp(2048.0, double.infinity)
+            .round();
+    return ResizeImage(
+      provider,
+      width: cap,
+      height: cap,
+      policy: ResizeImagePolicy.fit,
+      allowUpscaling: false,
+    );
   }
 
   /// 远端图片是否可以用缩略图做加载占位。
@@ -1179,7 +1219,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final next = slide.images[(slide.currentIndex + 1) % slide.images.length];
     final url = next.remoteUrl;
     if (!next.isRemote || url == null || url.isEmpty) return;
-    unawaited(precacheImage(NetworkImage(url), context, onError: (_, _) {}));
+    // 与渲染使用同一个 provider，保证缓存键一致（降采样后不会重复解码）
+    unawaited(
+      precacheImage(_imageProviderFor(next), context, onError: (_, _) {}),
+    );
   }
 
   void _rotateImage() {
@@ -1830,10 +1873,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           : _enterFullscreen,
                                     ),
                                   ),
-                                // 远端图片为只读，不显示删除按钮
-                                if (!slideProvider
+                                // 远端图片为只读：不显示删除按钮，改为复制到本机按钮
+                                // （位置与本地图片的排除/删除按钮保持一致）
+                                if (slideProvider
                                     .images[slideProvider.currentIndex]
                                     .isRemote)
+                                  Tooltip(
+                                    message: AppLocalizations.of(
+                                      context,
+                                    ).copyTo,
+                                    child: IconButton(
+                                      icon: const Icon(
+                                        Icons.content_copy,
+                                        color: Colors.greenAccent,
+                                      ),
+                                      onPressed: _copyCurrentImage,
+                                    ),
+                                  )
+                                else
                                   Tooltip(
                                     message:
                                         settings.deleteAction ==

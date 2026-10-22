@@ -13,7 +13,7 @@ import 'package:frame_flow/models/lan_models.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/screens/player_screen.dart';
-import 'package:frame_flow/services/directory_picker_service.dart';
+import 'package:frame_flow/services/copy_service.dart';
 import 'package:frame_flow/services/fullscreen_service.dart';
 import 'package:frame_flow/services/lan_client_service.dart';
 import 'package:frame_flow/services/media_store_service.dart';
@@ -256,8 +256,49 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
   @override
   void initState() {
     super.initState();
+    _restoreSortMode();
     _loadFirstPage();
     HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
+  }
+
+  /// 该共享文件夹的持久化键，与 [SharedFolderRef.key] 保持一致
+  String get _sharedFolderKey => '${widget.device.id}/${widget.folder.id}';
+
+  /// 恢复上次使用的排序方式；用户未选择过时跟随设置页的播放顺序
+  void _restoreSortMode() {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    final saved = settings.sharedSortFor(_sharedFolderKey);
+    if (saved != null) {
+      for (final action in _RemoteSortAction.values) {
+        if (action.name == saved) {
+          _setSortAction(action);
+          return;
+        }
+      }
+    }
+    _setSortAction(_actionForPlayOrder(settings.playOrder));
+  }
+
+  /// 设置页播放顺序 → 瀑布流排序方式的映射
+  static _RemoteSortAction _actionForPlayOrder(PlayOrder order) {
+    switch (order) {
+      case PlayOrder.sequential:
+        return _RemoteSortAction.nameAsc;
+      case PlayOrder.reverseSequential:
+        return _RemoteSortAction.nameDesc;
+      case PlayOrder.newestFirst:
+        return _RemoteSortAction.timeNewest;
+      case PlayOrder.oldestFirst:
+        return _RemoteSortAction.timeOldest;
+      case PlayOrder.sizeLargest:
+        return _RemoteSortAction.sizeLargest;
+      case PlayOrder.sizeSmallest:
+        return _RemoteSortAction.sizeSmallest;
+      case PlayOrder.random:
+        return _RemoteSortAction.random;
+      case PlayOrder.newPreferred:
+        return _RemoteSortAction.newPreferred;
+    }
   }
 
   @override
@@ -309,6 +350,28 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
       _loadingMore = false;
       _selectedIndex = null;
     });
+
+    // 新图优先无法由服务端分页排序：一次性取回元数据后整体加权随机
+    if (_sortKey == 'newPreferred') {
+      final all = await LanClientService.instance.fetchAllImages(
+        widget.device,
+        folderId: widget.folder.id,
+      );
+      if (!mounted || generation != _loadGeneration) return;
+      final items = all == null ? <ImageItem>[] : List<ImageItem>.of(all);
+      if (items.length > 1) SlideProvider.applyNewPreferredOrder(items);
+      setState(() {
+        _items
+          ..clear()
+          ..addAll(items);
+        _total = items.length;
+        _failed = all == null;
+        _loading = false;
+      });
+      if (items.isNotEmpty) _precache(items.take(_pageSize).toList());
+      return;
+    }
+
     final page = await _fetchPage(offset: 0, limit: _pageSize);
     if (!mounted || generation != _loadGeneration) return;
     setState(() {
@@ -344,35 +407,45 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
 
   // ── 排序 ──
 
-  /// 应用菜单中选中的排序方式
+  /// 应用菜单中选中的排序方式，并记住该共享文件夹的选择
   void _applySort(_RemoteSortAction action) {
-    setState(() {
-      switch (action) {
-        case _RemoteSortAction.nameAsc:
-          _sortKey = 'name';
-          _nameAscending = true;
-        case _RemoteSortAction.nameDesc:
-          _sortKey = 'name';
-          _nameAscending = false;
-        case _RemoteSortAction.timeNewest:
-          _sortKey = 'time';
-          _newestFirst = true;
-        case _RemoteSortAction.timeOldest:
-          _sortKey = 'time';
-          _newestFirst = false;
-        case _RemoteSortAction.sizeLargest:
-          _sortKey = 'size';
-          _largestFirst = true;
-        case _RemoteSortAction.sizeSmallest:
-          _sortKey = 'size';
-          _largestFirst = false;
-        case _RemoteSortAction.random:
-          _sortKey = 'random';
-          // 每次选择随机都换一个种子，保证分页顺序一致
-          _randomSeed = DateTime.now().microsecondsSinceEpoch.toString();
-      }
-    });
+    setState(() => _setSortAction(action));
+    Provider.of<SettingsProvider>(
+      context,
+      listen: false,
+    ).setSharedSort(_sharedFolderKey, action.name);
     _loadFirstPage();
+  }
+
+  /// 只更新排序状态（不触发重新加载），供恢复记忆与菜单选择共用
+  void _setSortAction(_RemoteSortAction action) {
+    switch (action) {
+      case _RemoteSortAction.nameAsc:
+        _sortKey = 'name';
+        _nameAscending = true;
+      case _RemoteSortAction.nameDesc:
+        _sortKey = 'name';
+        _nameAscending = false;
+      case _RemoteSortAction.timeNewest:
+        _sortKey = 'time';
+        _newestFirst = true;
+      case _RemoteSortAction.timeOldest:
+        _sortKey = 'time';
+        _newestFirst = false;
+      case _RemoteSortAction.sizeLargest:
+        _sortKey = 'size';
+        _largestFirst = true;
+      case _RemoteSortAction.sizeSmallest:
+        _sortKey = 'size';
+        _largestFirst = false;
+      case _RemoteSortAction.random:
+        _sortKey = 'random';
+        // 每次选择随机都换一个种子，保证同一次浏览的后续分页顺序一致
+        _randomSeed = DateTime.now().microsecondsSinceEpoch.toString();
+      case _RemoteSortAction.newPreferred:
+        // 新图优先需要全量元数据进行加权随机，标记后由客户端整体加载并排序
+        _sortKey = 'newPreferred';
+    }
   }
 
   /// 当前生效的排序方式
@@ -393,6 +466,8 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
         return _sortKey == 'size' && !_largestFirst;
       case _RemoteSortAction.random:
         return _sortKey == 'random';
+      case _RemoteSortAction.newPreferred:
+        return _sortKey == 'newPreferred';
     }
   }
 
@@ -420,7 +495,7 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
     );
   }
 
-  /// 排序入口：用一个按钮弹出 7 种排序方式，避免占用过多标题栏空间
+  /// 排序入口：用一个按钮弹出 8 种排序方式，避免占用过多标题栏空间
   Widget _buildSortMenu(AppLocalizations loc) {
     return PopupMenuButton<_RemoteSortAction>(
       tooltip: loc.sortBy,
@@ -464,6 +539,11 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
           label: loc.sortRandom,
           iconBuilder: (color) => Icon(Icons.shuffle, color: color),
         ),
+        _sortMenuItem(
+          action: _RemoteSortAction.newPreferred,
+          label: loc.newPreferred,
+          iconBuilder: (color) => Icon(Icons.fiber_new, color: color),
+        ),
       ],
     );
   }
@@ -473,78 +553,40 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
     unawaited(MasonryImageGrid.precacheItems(items, context, concurrency: 4));
   }
 
+  /// 同一批次的文件名去重，避免多张同名图片互相覆盖
+  String _uniqueBatchName(Set<String> used, String name) {
+    if (used.add(name)) return name;
+    final dot = name.lastIndexOf('.');
+    final base = dot > 0 ? name.substring(0, dot) : name;
+    final ext = dot > 0 ? name.substring(dot) : '';
+    var index = 1;
+    while (true) {
+      final candidate = '${base}_$index$ext';
+      if (used.add(candidate)) return candidate;
+      index++;
+    }
+  }
+
   /// 把远端图片复制到本机选定的目录
   Future<void> _copyImage(ImageItem item) async {
     final loc = AppLocalizations.of(context);
-    final sourceUrl = item.remoteUrl;
-    if (sourceUrl == null) return;
-
-    // 先选择目标目录，避免大图下载完成后才让用户选择
-    final destination = Platform.isAndroid
-        ? await MediaStoreService.pickDestinationDir()
-        : await DirectoryPickerService.pickDirectory();
+    final destination = await CopyService.resolveDestination(context);
     if (destination == null || !mounted) return;
-
-    final bytes = await LanClientService.instance.fetchBytes(sourceUrl);
-    if (!mounted) return;
-    if (bytes == null) {
-      _showSnack(loc.copyFailed);
-      return;
-    }
-
-    // 只取远端文件名，避免返回的路径片段被拼进目标路径
-    final name = _fileNameFor(item, 0);
-    var ok = false;
-    if (Platform.isAndroid) {
-      // SAF 只接受本地文件：先写入临时目录，再交给系统复制到目标目录
-      Directory? tempDir;
-      try {
-        final root = await getTemporaryDirectory();
-        tempDir = await Directory(
-          '${root.path}${Platform.pathSeparator}'
-          'frame_flow_copy_${DateTime.now().microsecondsSinceEpoch}',
-        ).create(recursive: true);
-        final tempFile = File('${tempDir.path}${Platform.pathSeparator}$name');
-        await tempFile.writeAsBytes(bytes, flush: true);
-        ok = await MediaStoreService.copyFiles(destination, [tempFile.path]);
-      } catch (_) {
-        ok = false;
-      } finally {
-        try {
-          await tempDir?.delete(recursive: true);
-        } catch (_) {}
-      }
-    } else {
-      try {
-        await File(
-          '$destination${Platform.pathSeparator}$name',
-        ).writeAsBytes(bytes, flush: true);
-        ok = true;
-      } catch (_) {
-        ok = false;
-      }
-    }
-
+    final ok = await CopyService.copyRemoteImage(item, destination);
     if (!mounted) return;
     _showSnack(ok ? loc.copySuccess : loc.copyFailed);
   }
 
   /// 远端文件名只保留 basename，空名或相对路径片段则生成兜底名称
   String _fileNameFor(ImageItem item, int index) {
-    final name = item.name.split(RegExp(r'[\\/]')).last;
-    if (name.isEmpty || name == '.' || name == '..') {
-      return 'frame_flow_${DateTime.now().microsecondsSinceEpoch}_$index';
-    }
-    return name;
+    return CopyService.fileNameFor(item, index);
   }
 
   /// 把共享文件夹中的全部图片复制到本机选定目录
   Future<void> _copyAll() async {
     if (_copyingAll) return;
     final loc = AppLocalizations.of(context);
-    final destination = Platform.isAndroid
-        ? await MediaStoreService.pickDestinationDir()
-        : await DirectoryPickerService.pickDirectory();
+    final destination = await CopyService.resolveDestination(context);
     if (destination == null || !mounted) return;
 
     setState(() => _copyingAll = true);
@@ -562,6 +604,7 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
         return;
       }
 
+      var cancelled = false;
       final progress = ValueNotifier<(int, int)>((0, all.length));
       unawaited(
         showDialog<void>(
@@ -584,15 +627,41 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
                 );
               },
             ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  cancelled = true;
+                  Navigator.of(dialogContext).pop();
+                },
+                child: Text(loc.cancel),
+              ),
+            ],
           ),
         ),
       );
 
       var failed = 0;
       if (Platform.isAndroid) {
-        // SAF 只接受本地文件：先全部写入临时目录，再一次性交给系统复制
+        // SAF 只接受本地文件：分批写入临时目录，攒够一批立即交给系统复制并清理，
+        // 避免一次性把整个文件夹下载到临时目录导致空间占用过大。
+        const batchSize = 50;
         Directory? tempDir;
-        final paths = <String>[];
+        var batchPaths = <String>[];
+        final usedNames = <String>{};
+
+        Future<void> flushBatch() async {
+          if (batchPaths.isEmpty) return;
+          if (!await MediaStoreService.copyFiles(destination, batchPaths)) {
+            failed += batchPaths.length;
+          }
+          for (final path in batchPaths) {
+            try {
+              await File(path).delete();
+            } catch (_) {}
+          }
+          batchPaths = [];
+        }
+
         try {
           final root = await getTemporaryDirectory();
           tempDir = await Directory(
@@ -600,6 +669,7 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
             'frame_flow_copy_${DateTime.now().microsecondsSinceEpoch}',
           ).create(recursive: true);
           for (var i = 0; i < all.length; i++) {
+            if (cancelled) break;
             final item = all[i];
             final url = item.remoteUrl;
             final bytes = url == null
@@ -608,19 +678,17 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
             if (bytes == null) {
               failed++;
             } else {
+              final name = _uniqueBatchName(usedNames, _fileNameFor(item, i));
               final file = File(
-                '${tempDir.path}${Platform.pathSeparator}'
-                '${_fileNameFor(item, i)}',
+                '${tempDir.path}${Platform.pathSeparator}$name',
               );
               await file.writeAsBytes(bytes, flush: true);
-              paths.add(file.path);
+              batchPaths.add(file.path);
+              if (batchPaths.length >= batchSize) await flushBatch();
             }
             progress.value = (i + 1, all.length);
           }
-          if (paths.isNotEmpty &&
-              !await MediaStoreService.copyFiles(destination, paths)) {
-            failed += paths.length;
-          }
+          if (!cancelled) await flushBatch();
         } catch (_) {
           failed = all.length;
         } finally {
@@ -630,6 +698,7 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
         }
       } else {
         for (var i = 0; i < all.length; i++) {
+          if (cancelled) break;
           final item = all[i];
           final url = item.remoteUrl;
           try {
@@ -639,9 +708,11 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
             if (bytes == null) {
               failed++;
             } else {
-              await File(
-                '$destination${Platform.pathSeparator}${_fileNameFor(item, i)}',
-              ).writeAsBytes(bytes, flush: true);
+              final target = await CopyService.uniqueDesktopTarget(
+                destination,
+                _fileNameFor(item, i),
+              );
+              await File(target).writeAsBytes(bytes, flush: true);
             }
           } catch (_) {
             failed++;
@@ -651,8 +722,13 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
       }
 
       if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-      _showSnack(failed == 0 ? loc.copiedAllTo : loc.copyFailed);
+      // 取消时进度框已由按钮关闭，只有正常结束才需要主动关闭
+      if (!cancelled) Navigator.of(context, rootNavigator: true).pop();
+      _showSnack(
+        cancelled
+            ? loc.copyCancelled
+            : (failed == 0 ? loc.copiedAllTo : loc.copyFailed),
+      );
     } finally {
       if (mounted) setState(() => _copyingAll = false);
     }
@@ -818,4 +894,5 @@ enum _RemoteSortAction {
   sizeLargest,
   sizeSmallest,
   random,
+  newPreferred,
 }
