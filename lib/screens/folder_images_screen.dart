@@ -11,10 +11,19 @@ import 'package:frame_flow/services/image_scan_service.dart';
 import 'package:frame_flow/services/media_store_service.dart';
 import 'package:frame_flow/screens/player_screen.dart';
 import 'package:frame_flow/widgets/masonry_image_grid.dart';
+import 'package:frame_flow/widgets/sort_alphabet_icon.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
-/// 瀑布流排序方式
-enum _SortMode { byName, byTime, bySize, random }
+/// 瀑布流排序方式（菜单项）
+enum _SortAction {
+  nameAsc,
+  nameDesc,
+  timeNewest,
+  timeOldest,
+  sizeLargest,
+  sizeSmallest,
+  random,
+}
 
 /// 文件夹图片瀑布流浏览页
 ///
@@ -47,17 +56,8 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   /// 是否正在预加载（防止重复触发）
   bool _isPreloading = false;
 
-  /// 当前排序方式
-  _SortMode _sortMode = _SortMode.byName;
-
-  /// 顺序模式下是否为升序（true = 顺序，false = 逆序）
-  bool _nameAscending = true;
-
-  /// 最新模式下是否最新在前（true = 最新，false = 最旧）
-  bool _newestFirst = true;
-
-  /// 大小模式下是否大文件在前（true = 最大，false = 最小）
-  bool _largestFirst = true;
+  /// 当前排序方式（默认顺序）
+  _SortAction _sortAction = _SortAction.nameAsc;
 
   /// 批次代次：每次重新排序都自增，使跨越排序、尚在途中的旧批次作废，
   /// 避免把「旧顺序下的这一批已就绪」错误地记到新顺序的批次边界上。
@@ -234,28 +234,25 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   // ── 排序 ──
   /// 按当前排序方式排列 [_allItems]
   void _applySortToAllItems() {
-    switch (_sortMode) {
-      case _SortMode.byName:
-        _allItems.sort((a, b) {
-          final cmp = a.name.compareTo(b.name);
-          return _nameAscending ? cmp : -cmp;
-        });
-        break;
-      case _SortMode.byTime:
-        _allItems.sort((a, b) {
-          final cmp = _modifiedTimeOf(a).compareTo(_modifiedTimeOf(b));
-          return _newestFirst ? -cmp : cmp;
-        });
-        break;
-      case _SortMode.bySize:
-        _allItems.sort((a, b) {
-          final cmp = _sizeOf(a).compareTo(_sizeOf(b));
-          return _largestFirst ? -cmp : cmp;
-        });
-        break;
-      case _SortMode.random:
+    switch (_sortAction) {
+      case _SortAction.nameAsc:
+        _allItems.sort((a, b) => a.name.compareTo(b.name));
+      case _SortAction.nameDesc:
+        _allItems.sort((a, b) => b.name.compareTo(a.name));
+      case _SortAction.timeNewest:
+        _allItems.sort(
+          (a, b) => _modifiedTimeOf(b).compareTo(_modifiedTimeOf(a)),
+        );
+      case _SortAction.timeOldest:
+        _allItems.sort(
+          (a, b) => _modifiedTimeOf(a).compareTo(_modifiedTimeOf(b)),
+        );
+      case _SortAction.sizeLargest:
+        _allItems.sort((a, b) => _sizeOf(b).compareTo(_sizeOf(a)));
+      case _SortAction.sizeSmallest:
+        _allItems.sort((a, b) => _sizeOf(a).compareTo(_sizeOf(b)));
+      case _SortAction.random:
         _allItems.shuffle();
-        break;
     }
   }
 
@@ -291,56 +288,83 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     unawaited(_bootstrapBatches());
   }
 
-  /// 顺序：点击切到顺序模式；已在顺序模式时，再次点击在顺序/逆序间切换
-  void _onSortByNamePressed() {
-    if (_sortMode == _SortMode.byName) {
-      _nameAscending = !_nameAscending;
-    } else {
-      _sortMode = _SortMode.byName;
-    }
+  /// 应用菜单中选中的排序方式
+  void _applySort(_SortAction action) {
+    _sortAction = action;
     _resort();
   }
 
-  /// 最新：点击切到最新模式；已在最新模式时，再次点击在最新/最旧间切换
-  void _onSortByTimePressed() {
-    if (_sortMode == _SortMode.byTime) {
-      _newestFirst = !_newestFirst;
-    } else {
-      _sortMode = _SortMode.byTime;
-      _newestFirst = true;
-    }
-    _resort();
-  }
+  bool _isSortActive(_SortAction action) => _sortAction == action;
 
-  /// 大小：点击切到大小模式；已在大小模式时，再次点击在最大/最小间切换
-  void _onSortBySizePressed() {
-    if (_sortMode == _SortMode.bySize) {
-      _largestFirst = !_largestFirst;
-    } else {
-      _sortMode = _SortMode.bySize;
-      _largestFirst = true;
-    }
-    _resort();
-  }
-
-  /// 随机：每次点击都重新打乱
-  void _onSortRandomPressed() {
-    _sortMode = _SortMode.random;
-    _resort();
-  }
-
-  /// 排序按钮；当前生效的排序方式用强调色标识，图标体现方向
-  Widget _buildSortButton({
-    required IconData icon,
-    required String tooltip,
-    required bool active,
-    required VoidCallback onPressed,
+  PopupMenuItem<_SortAction> _sortMenuItem({
+    required _SortAction action,
+    required String label,
+    required Widget Function(Color color) iconBuilder,
   }) {
-    return IconButton(
-      icon: Icon(icon),
-      color: active ? const Color(0xFFe94560) : Colors.white70,
-      tooltip: tooltip,
-      onPressed: onPressed,
+    final selected = _isSortActive(action);
+    final color = selected ? const Color(0xFFe94560) : Colors.white70;
+    return PopupMenuItem<_SortAction>(
+      value: action,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: Center(child: iconBuilder(color)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text(label)),
+          if (selected) Icon(Icons.check, color: color, size: 18),
+        ],
+      ),
+    );
+  }
+
+  /// 排序入口：用一个按钮弹出 7 种排序方式，避免占用过多标题栏空间
+  Widget _buildSortMenu(AppLocalizations loc) {
+    return PopupMenuButton<_SortAction>(
+      tooltip: loc.sortBy,
+      icon: const Icon(Icons.sort, color: Colors.white70),
+      onSelected: _applySort,
+      itemBuilder: (context) => [
+        _sortMenuItem(
+          action: _SortAction.nameAsc,
+          label: loc.sortSequential,
+          iconBuilder: (color) =>
+              SortAlphabetIcon(ascending: true, color: color),
+        ),
+        _sortMenuItem(
+          action: _SortAction.nameDesc,
+          label: loc.sortReverse,
+          iconBuilder: (color) =>
+              SortAlphabetIcon(ascending: false, color: color),
+        ),
+        _sortMenuItem(
+          action: _SortAction.timeNewest,
+          label: loc.sortNewest,
+          iconBuilder: (color) => Icon(Icons.update, color: color),
+        ),
+        _sortMenuItem(
+          action: _SortAction.timeOldest,
+          label: loc.sortOldest,
+          iconBuilder: (color) => Icon(Icons.history, color: color),
+        ),
+        _sortMenuItem(
+          action: _SortAction.sizeLargest,
+          label: loc.sortLargest,
+          iconBuilder: (color) => Icon(Icons.south, color: color),
+        ),
+        _sortMenuItem(
+          action: _SortAction.sizeSmallest,
+          label: loc.sortSmallest,
+          iconBuilder: (color) => Icon(Icons.north, color: color),
+        ),
+        _sortMenuItem(
+          action: _SortAction.random,
+          label: loc.sortRandom,
+          iconBuilder: (color) => Icon(Icons.shuffle, color: color),
+        ),
+      ],
     );
   }
 
@@ -382,15 +406,14 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   /// 从瀑布流进入幻灯播放。
   ///
   /// 播放范围限定为当前文件夹：使用本次扫描到的全部图片（而不是仅已加载的
-  /// 那一批），顺序按「播放顺序」设置排列，起点为被点中的那张图片。
+  /// 那一批），顺序沿用瀑布流当前的排序方式（而不是设置页的播放顺序），
+  /// 起点为被点中的那张图片。
   void _startPlaybackFrom(int index) {
     if (index < 0 || index >= _items.length) return;
     final item = _items[index];
-    final settings = Provider.of<SettingsProvider>(context, listen: false);
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
 
-    slideProvider.setImages(_allItems.toList(), playOrder: settings.playOrder);
-    slideProvider.sortByPlayOrder(settings.playOrder);
+    slideProvider.setImages(_allItems.toList(), followListOrder: true);
     // 排序后重新定位被点中的图片；理论上必然能找到，兜底回到第一张
     final startIndex = slideProvider.images.indexWhere(
       (image) => image.path == item.path,
@@ -433,36 +456,12 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
           backgroundColor: const Color(0xFF16213e),
           actions: [
             if (_items.isNotEmpty) ...[
-              // 顺序/逆序：用一对方向相反的箭头表示升序/降序
-              _buildSortButton(
-                icon: _nameAscending
-                    ? Icons.arrow_upward
-                    : Icons.arrow_downward,
-                tooltip: _nameAscending ? loc.sortSequential : loc.sortReverse,
-                active: _sortMode == _SortMode.byName,
-                onPressed: _onSortByNamePressed,
+              IconButton(
+                tooltip: loc.startPlay,
+                icon: const Icon(Icons.play_arrow),
+                onPressed: () => _startPlaybackFrom(0),
               ),
-              // 最新/最旧：用一对方向相反的时钟图标表示时间倒序/正序
-              _buildSortButton(
-                icon: _newestFirst ? Icons.update : Icons.history,
-                tooltip: _newestFirst ? loc.sortNewest : loc.sortOldest,
-                active: _sortMode == _SortMode.byTime,
-                onPressed: _onSortByTimePressed,
-              ),
-              // 最大/最小：用一对方向相反的箭头表示降序/升序
-              _buildSortButton(
-                icon: _largestFirst ? Icons.south : Icons.north,
-                tooltip: _largestFirst ? loc.sortLargest : loc.sortSmallest,
-                active: _sortMode == _SortMode.bySize,
-                onPressed: _onSortBySizePressed,
-              ),
-              // 随机（每次点击重新打乱）
-              _buildSortButton(
-                icon: Icons.shuffle,
-                tooltip: loc.sortRandom,
-                active: _sortMode == _SortMode.random,
-                onPressed: _onSortRandomPressed,
-              ),
+              _buildSortMenu(loc),
             ],
           ],
         ),

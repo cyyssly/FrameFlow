@@ -19,15 +19,30 @@ class ImageScanService {
   };
 
   /// 扫描文件夹中的图片（Android 走 MediaStore，桌面走文件系统）
+  ///
+  /// 扫描结果会剔除 [SettingsProvider.excludedPaths] 中记录的图片：
+  /// 排除操作只是把路径记进设置，若不在扫描时过滤，退出页面重新进入后
+  /// 被排除的图片会再次出现。
   static Future<List<ImageItem>> scanFolder(
     String folderPath,
     SettingsProvider settings,
   ) async {
+    // Windows 文件路径不区分大小写，统一转小写比较，避免因大小写差异漏过滤
+    final excluded = {
+      for (final path in settings.excludedPaths)
+        Platform.isWindows ? path.toLowerCase() : path,
+    };
+    bool notExcluded(ImageItem item) => !excluded.contains(
+      Platform.isWindows ? item.path.toLowerCase() : item.path,
+    );
+
     // Android 端通过 MediaStore 查询（绕过 Scoped Storage 限制）
     if (Platform.isAndroid) {
       // MediaStore 已索引好宽高，直接透传，调用方无需再读原图
       final images = await MediaStoreService.getFolderImages(folderPath);
-      return images.where((item) => _isSupportedImage(item.path)).toList();
+      return images
+          .where((item) => _isSupportedImage(item.path) && notExcluded(item))
+          .toList();
     }
 
     // 桌面端使用文件系统 API
@@ -52,6 +67,7 @@ class ImageScanService {
             path: file.path,
           ),
         )
+        .where(notExcluded)
         .toList();
   }
 
@@ -143,6 +159,13 @@ class ImageScanService {
     try {
       handle = file.openSync();
       final bytes = handle.readSync(length);
+
+      // PNG 先直接读 IHDR：image 包的 PngDecoder.startDecode 会一直扫描到
+      // IEND 才返回，只传文件头时体积较大的 PNG 会被判为数据不完整而返回
+      // null（瀑布流随即按正方形排版，表现为宽高比错误）。
+      final headerRatio = _readPngRatio(bytes);
+      if (headerRatio != null) return headerRatio;
+
       final decoder = img.findDecoderForData(bytes);
       final info = decoder?.startDecode(bytes);
       if (info != null && info.height > 0) {
@@ -156,5 +179,30 @@ class ImageScanService {
       } catch (_) {}
     }
     return null;
+  }
+
+  /// 直接从 PNG 的 IHDR 块读取宽高比。
+  ///
+  /// IHDR 固定为 PNG 的第一个块，宽高位于文件偏移 16~23 字节（大端），
+  /// 因此只需读取文件开头即可，无需读完整张图片。
+  static double? _readPngRatio(List<int> bytes) {
+    if (bytes.length < 24) return null;
+    const signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    for (var i = 0; i < signature.length; i++) {
+      if (bytes[i] != signature[i]) return null;
+    }
+    // 第一个块类型必须是 "IHDR"
+    if (bytes[12] != 0x49 ||
+        bytes[13] != 0x48 ||
+        bytes[14] != 0x44 ||
+        bytes[15] != 0x52) {
+      return null;
+    }
+    final width =
+        (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+    final height =
+        (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+    if (width <= 0 || height <= 0) return null;
+    return width / height;
   }
 }

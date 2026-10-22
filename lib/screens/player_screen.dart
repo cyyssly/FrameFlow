@@ -518,9 +518,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     final settings = Provider.of<SettingsProvider>(context, listen: false);
+    // 从瀑布流进入时按列表既有顺序（即其当前排序）播放，忽略设置页的随机模式
+    final followListOrder = slideProvider.followListOrder;
     if (!settings.loopPlay) {
       // 顺序/最新/最旧模式：检查是否到达最后一张图片
       final isSequentialOrder =
+          followListOrder ||
           settings.playOrder == PlayOrder.sequential ||
           settings.playOrder == PlayOrder.reverseSequential ||
           settings.playOrder == PlayOrder.newestFirst ||
@@ -539,7 +542,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
 
       // 随机播放时，检查是否到达随机序列的最后一个位置
-      if (settings.playOrder == PlayOrder.random &&
+      if (!followListOrder &&
+          settings.playOrder == PlayOrder.random &&
           slideProvider.isRandomPlaybackComplete()) {
         slideProvider.stopPlay();
         _autoPlayTimer?.cancel();
@@ -553,7 +557,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    if (settings.playOrder == PlayOrder.random) {
+    if (!followListOrder && settings.playOrder == PlayOrder.random) {
       // 使用预打乱的随机序列进行播放
       slideProvider.nextRandomImage();
     } else {
@@ -582,10 +586,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _zoomSuspended = false;
       });
     }
-    Provider.of<SlideProvider>(
-      context,
-      listen: false,
-    ).prevImage(playOrder: settings.playOrder);
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    slideProvider.prevImage(
+      playOrder: slideProvider.followListOrder ? null : settings.playOrder,
+    );
     _startAutoPlay();
   }
 

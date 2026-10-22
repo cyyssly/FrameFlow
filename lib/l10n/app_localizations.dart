@@ -263,7 +263,10 @@ class AppLocalizations {
   String get allImagesRestored =>
       _t('所有图片已恢复', 'All images restored', '所有圖片已恢復');
   String get restoreAll => _t('恢复全部', 'Restore All', '恢復全部');
+  String get restoreFiles => _t('恢复文件', 'Restore Files', '恢復檔案');
+  String get deleteFiles => _t('删除文件', 'Delete Files', '刪除檔案');
   String get excludeFolderVirtual => _t('已排除的文件', 'Excluded Files', '已排除的文件');
+  String get excludedFilesSection => _t('已排除文件', 'Excluded Files', '已排除文件');
   String get deleteImage => _t('删除', 'Delete', '刪除');
   String get moveTo => _t('移动到', 'Move To', '移動到');
   String get copyTo => _t('复制到', 'Copy To', '複製到');
@@ -277,6 +280,8 @@ class AppLocalizations {
   String get moveFailed => _t('移动失败', 'Move failed', '移動失敗');
   String get copyFailed => _t('复制失败', 'Copy failed', '複製失敗');
   String get copySuccess => _t('复制成功', 'Copied', '複製成功');
+  String copyingFiles(int done, int total) =>
+      _t('正在复制 $done/$total', 'Copying $done/$total', '正在複製 $done/$total');
   String get deletedToTrash => _t('已移入回收站', 'Moved to trash', '已移入回收站');
   String get deletedAllToTrash =>
       _t('全部已移入回收站', 'All moved to trash', '全部已移入回收站');
@@ -284,6 +289,7 @@ class AppLocalizations {
   // 文件夹图片浏览
   String get noImagesInFolder =>
       _t('此文件夹中没有图片', 'No images in this folder', '此文件夾中沒有圖片');
+  String get sortBy => _t('排序', 'Sort', '排序');
   String get sortSequential => _t('顺序', 'Ascending', '順序');
   String get sortReverse => _t('逆序', 'Descending', '逆序');
   String get sortNewest => _t('最新', 'Newest', '最新');
@@ -376,14 +382,45 @@ class AppLocalizations {
     '支援 JPG、JPEG、PNG、WebP、BMP、GIF、TIFF 等常見格式',
   );
   String get helpExclude => _t(
-    '排除播放：把不想看的图片移出播放列表（不删除文件），已排除的图片可恢复或实际删除，也可以移动或者复制到其他位置',
-    'Exclude: remove images from the playlist without deleting files; excluded images can be restored or deleted, and can also be moved or copied elsewhere',
-    '排除播放：把不想看的圖片移出播放列表（不刪除檔案），已排除的圖片可恢復或實際刪除，也可以移動或者複製到其他位置',
+    '排除播放：把不想看的图片移出播放列表（不删除文件），已排除的图片可恢复或实际删除，也可以移动或者复制到其他位置；排除结果会保留，重新进入文件夹或重新播放时不再出现',
+    'Exclude: remove images from the playlist without deleting files; excluded images can be restored or deleted, and can also be moved or copied elsewhere; exclusions persist when you revisit the folder or restart playback',
+    '排除播放：把不想看的圖片移出播放列表（不刪除檔案），已排除的圖片可恢復或實際刪除，也可以移動或者複製到其他位置；排除結果會保留，重新進入文件夾或重新播放時不再出現',
   );
   String get helpBrowse => _t(
-    '瀑布流浏览：点击任意图片即可播放当前文件夹；文件夹右侧可直接播放该文件夹',
-    'Grid browsing: tap any image to play the folder, or use the folder play button',
-    '瀑布流瀏覽：點擊任意圖片即可播放當前文件夾；文件夾右側可直接播放該文件夾',
+    '瀑布流浏览：点击任意图片或点击右上角播放按钮，即可按当前文件夹排序播放幻灯',
+    'Grid browsing: tap any image or the play button in the top-right to start slides in the folder\'s current sort order',
+    '瀑布流瀏覽：點擊任意圖片或點擊右上角播放按鈕，即可按當前文件夾排序播放幻燈',
+  );
+  String get helpSort => _t(
+    '瀑布流右上角提供顺序、逆序、最新、最旧、最大、最小、随机 7 种排序，本地与共享文件夹一致',
+    'The grid sort menu offers ascending, descending, newest, oldest, largest, smallest and random, for both local and shared folders',
+    '瀑布流右上角提供順序、逆序、最新、最舊、最大、最小、隨機 7 種排序，本地與共享文件夾一致',
+  );
+  String get helpWaterfallPlay => _t(
+    '从瀑布流进入播放时按当前排序顺序播放；从其他入口进入则按设置页的播放顺序',
+    'Playback started from the grid follows its current sort; other entries use the play order from settings',
+    '從瀑布流進入播放時按當前排序順序播放；從其他入口進入則按設定頁的播放順序',
+  );
+  String get helpGroupShare => _t('内网共享', 'LAN Sharing', '內網共享');
+  String get helpShareOverview => _t(
+    '同一网络下的设备可互相读取共享文件夹，直接播放或复制，无需先拷贝照片',
+    'Devices on the same network can read shared folders and play or copy images directly, no copying required',
+    '同一網絡下的裝置可互相讀取共享文件夾，直接播放或複製，無需先拷貝照片',
+  );
+  String get helpShareHost => _t(
+    '共享方：在内网共享页开启开关并选择要共享的文件夹；停留在该页可保持服务在线',
+    'Host: enable sharing and pick folders on the LAN Sharing page; stay on that page to keep the service online',
+    '共享方：在內網共享頁開啟開關並選擇要共享的文件夾；停留在該頁可保持服務在線',
+  );
+  String get helpShareClient => _t(
+    '接收方：在选择图片页添加共享源，选择对方文件夹后即可与本机文件夹混合播放',
+    'Client: add a share source on the Select Photos page, then play local and shared folders together',
+    '接收方：在選擇圖片頁新增共享來源，選擇對方文件夾後即可與本機文件夾混合播放',
+  );
+  String get helpCopyImages => _t(
+    '共享图片支持复制：桌面端悬停、移动端选中后可复制单张，标题栏的复制按钮可一次复制整个文件夹',
+    'Shared images can be copied: hover on desktop or select on mobile to copy one image, or use the toolbar button to copy the whole folder',
+    '共享圖片支援複製：桌面端懸停、移動端選中後可複製單張，標題欄的複製按鈕可一次複製整個文件夾',
   );
   String get helpInfoDisplay => _t(
     '可显示文件名、大小、分辨率与页码，并支持自动隐藏',

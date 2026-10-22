@@ -9,18 +9,27 @@ class SlideProvider extends ChangeNotifier {
   List<int> _randomOrder = [];
   int _currentIndex = 0;
   bool _isPlaying = false;
+
+  /// 是否按传入列表的既有顺序播放（从瀑布流进入时为其当前排序）
+  bool _followListOrder = false;
   int _interval = 3000;
   List<String> _folderPaths = [];
 
   List<ImageItem> get images => _images;
   int get currentIndex => _currentIndex;
   bool get isPlaying => _isPlaying;
+  bool get followListOrder => _followListOrder;
   int get interval => _interval;
   String get folderPath => _folderPaths.isNotEmpty ? _folderPaths.first : '';
   List<String> get folderPaths => _folderPaths;
 
-  void setImages(List<ImageItem> images, {PlayOrder? playOrder}) {
+  void setImages(
+    List<ImageItem> images, {
+    PlayOrder? playOrder,
+    bool followListOrder = false,
+  }) {
     _images = images;
+    _followListOrder = followListOrder;
     _randomOrder = List.generate(images.length, (i) => i)..shuffle();
     _currentIndex = (playOrder == PlayOrder.random && _randomOrder.isNotEmpty)
         ? _randomOrder[0]

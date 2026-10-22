@@ -9,7 +9,7 @@ import 'package:frame_flow/screens/folder_selection_screen.dart';
 import 'package:frame_flow/screens/help_screen.dart';
 import 'package:frame_flow/screens/lan_devices_screen.dart';
 import 'package:frame_flow/screens/player_screen.dart';
-import 'package:frame_flow/services/media_store_service.dart';
+import 'package:frame_flow/services/image_scan_service.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -170,61 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<List<ImageItem>> _scanFolder(
     String folderPath,
     SettingsProvider settings,
-  ) async {
-    const supportedExtensions = {
-      'jpg',
-      'jpeg',
-      'png',
-      'webp',
-      'bmp',
-      'gif',
-      'tiff',
-      'tif',
-    };
-
-    // Android 端通过 MediaStore 查询（绕过 Scoped Storage 限制）
-    if (Platform.isAndroid) {
-      // 直接透传 ImageItem，保留 MediaStore 已索引好的宽高比
-      final images = await MediaStoreService.getFolderImages(folderPath);
-      return images.where((item) {
-        final dotIndex = item.path.lastIndexOf('.');
-        if (dotIndex == -1) return false;
-        final ext = item.path.toLowerCase().substring(dotIndex + 1);
-        return supportedExtensions.contains(ext);
-      }).toList();
-    }
-
-    // 桌面端使用文件系统 API
-    List<File> files = [];
-
-    if (settings.recursiveScan) {
-      final dir = Directory(folderPath);
-      await for (var entity in dir.list(recursive: true)) {
-        if (entity is File) {
-          files.add(entity);
-        }
-      }
-    } else {
-      final dir = Directory(folderPath);
-      final entities = await dir.list().toList();
-      files = entities.whereType<File>().toList();
-    }
-
-    return files
-        .where((file) {
-          final dotIndex = file.path.lastIndexOf('.');
-          if (dotIndex == -1) return false;
-          final ext = file.path.toLowerCase().substring(dotIndex + 1);
-          return supportedExtensions.contains(ext);
-        })
-        .map(
-          (file) => ImageItem(
-            name: file.path.split(Platform.pathSeparator).last,
-            path: file.path,
-          ),
-        )
-        .toList();
-  }
+  ) => ImageScanService.scanFolder(folderPath, settings);
 
   Future<void> _startPlayback() async {
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);

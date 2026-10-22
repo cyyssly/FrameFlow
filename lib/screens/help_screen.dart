@@ -5,7 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 /// 展示用版本号（与 pubspec.yaml 的 version 保持一致，改版本时需同步）
-const String appVersionLabel = 'V1.5.0';
+const String appVersionLabel = 'V1.5.1';
 
 /// 帮助页：说明文档 / 关于 / 赞助
 ///
@@ -148,12 +148,19 @@ class _HelpScreenState extends State<HelpScreen> {
     _groupTitle(loc.helpGroupFullscreen),
     _bullet(loc.helpFullscreen),
     _bullet(loc.helpToolbar),
+    _bullet(loc.helpInfoDisplay),
     _groupTitle(loc.helpGroupFolders),
     _bullet(loc.helpFolders),
     _bullet(loc.helpFormats),
     _bullet(loc.helpExclude),
     _bullet(loc.helpBrowse),
-    _bullet(loc.helpInfoDisplay),
+    _bullet(loc.helpSort),
+    _bullet(loc.helpWaterfallPlay),
+    _groupTitle(loc.helpGroupShare),
+    _bullet(loc.helpShareOverview),
+    _bullet(loc.helpShareHost),
+    _bullet(loc.helpShareClient),
+    _bullet(loc.helpCopyImages),
   ];
 
   /// 关于：版本信息 + GitHub 链接
