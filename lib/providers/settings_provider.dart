@@ -385,7 +385,10 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   void removeExcludedPath(String path) {
-    _excludedPaths.remove(path);
+    final before = _excludedPaths.length;
+    // 历史数据里可能存在重复路径，这里一次性全部移除
+    _excludedPaths.removeWhere((item) => item == path);
+    if (_excludedPaths.length == before) return;
     notifyListeners();
     _saveSettings();
   }
@@ -475,7 +478,8 @@ class SettingsProvider extends ChangeNotifier {
 
     final excludedStr = prefs.getString('excludedPaths');
     if (excludedStr != null) {
-      _excludedPaths = json.decode(excludedStr).cast<String>();
+      // 去掉历史数据中的重复路径，避免已排除统计翻倍
+      _excludedPaths = json.decode(excludedStr).cast<String>().toSet().toList();
     }
 
     _localSortModes = _decodeStringMap(prefs.getString('localSortModes'));

@@ -350,6 +350,16 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     return lastIndex >= 0 ? clean.substring(lastIndex + 1) : clean;
   }
 
+  /// 规范化目录路径，避免同一目录因末尾分隔符差异被拆成两组
+  String _normalizeFolderPath(String path) {
+    if (path.isEmpty) return path;
+    var clean = path;
+    while (clean.length > 1 && (clean.endsWith('/') || clean.endsWith('\\'))) {
+      clean = clean.substring(0, clean.length - 1);
+    }
+    return clean;
+  }
+
   /// 构建文件夹统计信息的 widget
   Widget _buildFolderStats(String folderPath) {
     final settingsProvider = Provider.of<SettingsProvider>(
@@ -829,10 +839,16 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   }) {
     // 按父目录归组，并忽略应用外已被移走的文件
     final groups = <String, List<String>>{};
+    final seen = <String>{};
     for (final path in settings.excludedPaths) {
       if (!File(path).existsSync()) continue;
-      final parent = File(path).parent.path;
-      groups.putIfAbsent(parent, () => []).add(path);
+      // 同一张图片可能因历史数据被重复记录，只统计一次
+      if (!seen.add(path)) continue;
+      final parent = _normalizeFolderPath(File(path).parent.path);
+      // 手机端只按最后一级目录名归组：同名目录即使路径不同也视为同一目录，
+      // 避免出现两行同名但内容不同的分组
+      final key = Platform.isAndroid ? _getLastPathSegment(parent) : parent;
+      groups.putIfAbsent(key, () => []).add(path);
     }
     if (groups.isEmpty) return const [];
 
@@ -864,12 +880,13 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
 
   /// 单个文件夹的已排除文件条目
   ///
+  /// [folderName] 即界面显示的分组名称（手机端为目录名，桌面端为完整路径）。
   /// 与本地 / 共享文件夹共用 [_folderRow]，保证行高与垂直居中完全一致。
-  Widget _buildExcludedGroupTile(String folderPath, List<String> paths) {
+  Widget _buildExcludedGroupTile(String folderName, List<String> paths) {
     final loc = AppLocalizations.of(context);
     final firstPath = paths.first;
     return _folderRow(
-      key: ValueKey('excluded-group-$folderPath'),
+      key: ValueKey('excluded-group-$folderName'),
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: SizedBox(
@@ -882,7 +899,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
           ),
         ),
       ),
-      title: Platform.isAndroid ? _getLastPathSegment(folderPath) : folderPath,
+      title: folderName,
       subtitle: Text(
         loc.filesCount(paths.length),
         style: const TextStyle(fontSize: 12, color: Colors.grey),
