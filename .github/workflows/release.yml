@@ -200,5 +200,15 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          # 有自定义说明时不再让 GitHub 生成变更列表，避免两者互相覆盖
+          generate_release_notes: ${{ steps.notes.outputs.body_path == '' }}
           body_path: ${{ steps.notes.outputs.body_path }}
+
+      # 显式再写一次正文：action 在更新既有 Release 时未必会覆盖正文，
+      # 用 gh release edit 保证自定义说明一定生效
+      - name: Apply release notes
+        if: steps.notes.outputs.body_path != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --notes-file "${{ steps.notes.outputs.body_path }}"
+
