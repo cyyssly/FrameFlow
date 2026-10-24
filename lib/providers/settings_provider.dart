@@ -66,6 +66,9 @@ class SettingsProvider extends ChangeNotifier {
   // 文件与目录相关
   bool _recursiveScan = true;
 
+  // 桌面端窗口行为：关闭按钮是否收起到系统托盘
+  bool _closeToTray = false;
+
   String? _lastFolderPath;
   List<String> _lastFolderPaths = [];
 
@@ -99,6 +102,12 @@ class SettingsProvider extends ChangeNotifier {
 
   // 局域网共享
   bool _lanShareEnabled = false;
+
+  /// 是否允许其他终端远程排除本机共享文件夹中的图片（仅排除播放，不删除文件）
+  bool _allowRemoteExclude = false;
+
+  /// 是否允许其他终端复制本机共享文件夹中的图片
+  bool _allowRemoteCopy = false;
 
   /// 本地文件夹是否共享给其他设备的单独开关（缺省视为共享）
   Map<String, bool> _lanFolderSharing = {};
@@ -142,6 +151,7 @@ class SettingsProvider extends ChangeNotifier {
   int get controlsHideDelay => _controlsHideDelay;
   bool get keepControlsOnPause => _keepControlsOnPause;
   bool get recursiveScan => _recursiveScan;
+  bool get closeToTray => _closeToTray;
 
   String? get lastFolderPath => _lastFolderPath;
   List<String> get lastFolderPaths => _lastFolderPaths;
@@ -153,6 +163,12 @@ class SettingsProvider extends ChangeNotifier {
 
   /// 是否允许局域网内其他设备浏览/播放本机共享的图片
   bool get lanShareEnabled => _lanShareEnabled;
+
+  /// 是否允许其他终端远程排除播放本机共享文件夹中的图片
+  bool get allowRemoteExclude => _allowRemoteExclude;
+
+  /// 是否允许其他终端复制本机共享文件夹中的图片
+  bool get allowRemoteCopy => _allowRemoteCopy;
 
   /// 各本地文件夹的共享开关（未记录的文件夹缺省为共享）
   Map<String, bool> get lanFolderSharing => Map.unmodifiable(_lanFolderSharing);
@@ -265,6 +281,12 @@ class SettingsProvider extends ChangeNotifier {
     _saveSettings();
   }
 
+  void setCloseToTray(bool value) {
+    _closeToTray = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
   void setLastFolderPath(String? value) {
     _lastFolderPath = value;
     notifyListeners();
@@ -304,6 +326,20 @@ class SettingsProvider extends ChangeNotifier {
   void setLanShareEnabled(bool value) {
     if (_lanShareEnabled == value) return;
     _lanShareEnabled = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setAllowRemoteExclude(bool value) {
+    if (_allowRemoteExclude == value) return;
+    _allowRemoteExclude = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void setAllowRemoteCopy(bool value) {
+    if (_allowRemoteCopy == value) return;
+    _allowRemoteCopy = value;
     notifyListeners();
     _saveSettings();
   }
@@ -399,6 +435,17 @@ class SettingsProvider extends ChangeNotifier {
     _saveSettings();
   }
 
+  /// 批量移除已排除路径，只触发一次通知与保存
+  void removeExcludedPaths(Iterable<String> paths) {
+    final targets = paths.toSet();
+    if (targets.isEmpty) return;
+    final before = _excludedPaths.length;
+    _excludedPaths.removeWhere(targets.contains);
+    if (_excludedPaths.length == before) return;
+    notifyListeners();
+    _saveSettings();
+  }
+
   /// 记住某个本地文件夹的瀑布流排序方式
   void setLocalSort(String folderPath, String sortId) {
     if (_localSortModes[folderPath] == sortId) return;
@@ -468,6 +515,7 @@ class SettingsProvider extends ChangeNotifier {
     _controlsHideDelay = prefs.getInt('controlsHideDelay') ?? 3;
     _keepControlsOnPause = prefs.getBool('keepControlsOnPause') ?? false;
     _recursiveScan = prefs.getBool('recursiveScan') ?? true;
+    _closeToTray = prefs.getBool('closeToTray') ?? false;
 
     _lastFolderPath = prefs.getString('lastFolderPath');
     final lastFolderPathsStr = prefs.getString('lastFolderPaths');
@@ -495,6 +543,8 @@ class SettingsProvider extends ChangeNotifier {
     _useCustomInterval = prefs.getBool('useCustomInterval') ?? false;
 
     _lanShareEnabled = prefs.getBool('lanShareEnabled') ?? false;
+    _allowRemoteExclude = prefs.getBool('allowRemoteExclude') ?? false;
+    _allowRemoteCopy = prefs.getBool('allowRemoteCopy') ?? false;
     _lanFolderSharing = {};
     final lanFolderSharingStr = prefs.getString('lanFolderSharing');
     if (lanFolderSharingStr != null) {
@@ -601,6 +651,7 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.setInt('controlsHideDelay', _controlsHideDelay);
     await prefs.setBool('keepControlsOnPause', _keepControlsOnPause);
     await prefs.setBool('recursiveScan', _recursiveScan);
+    await prefs.setBool('closeToTray', _closeToTray);
 
     await prefs.setString('lastFolderPath', _lastFolderPath ?? '');
     await prefs.setString('lastFolderPaths', json.encode(_lastFolderPaths));
@@ -620,6 +671,8 @@ class SettingsProvider extends ChangeNotifier {
     }
     await prefs.setInt('imageOrientation', _imageOrientation.index);
     await prefs.setBool('lanShareEnabled', _lanShareEnabled);
+    await prefs.setBool('allowRemoteExclude', _allowRemoteExclude);
+    await prefs.setBool('allowRemoteCopy', _allowRemoteCopy);
     await prefs.setString('lanFolderSharing', json.encode(_lanFolderSharing));
     await prefs.setString(
       'sharedFolders',

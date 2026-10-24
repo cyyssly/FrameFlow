@@ -153,6 +153,32 @@ class AppLocalizations {
     'Keep controls visible when paused',
     '暫停播放時不自動隱藏播放工具欄',
   );
+  String get closeToTray =>
+      _t('关闭时最小化到托盘', 'Minimize to Tray on Close', '關閉時最小化到托盤');
+  String get closeToTrayDesc => _t(
+    '关闭窗口时收起到系统托盘继续运行，以便其他内网终端浏览本机图片',
+    'Keep running in the system tray when the window is closed so other LAN devices can keep browsing your photos',
+    '關閉窗口時收起到系統托盤繼續運行，以便其他內網終端瀏覽本機圖片',
+  );
+  String get trayShowWindow => _t('显示主界面', 'Show Window', '顯示主界面');
+  String get trayExit => _t('退出 FrameFlow', 'Exit FrameFlow', '退出 FrameFlow');
+
+  // 内网共享：远程操作权限
+  String get allowRemoteExclude =>
+      _t('允许远程排除播放', 'Allow Remote Exclude', '允許遠端排除播放');
+  String get allowRemoteExcludeDesc => _t(
+    '仅排除播放，不会实际删除，可一键恢复',
+    'Exclude from playback only; files are never deleted and can be restored',
+    '僅排除播放，不會實際刪除，可一鍵恢復',
+  );
+  String get allowRemoteCopy => _t('允许远程复制', 'Allow Remote Copy', '允許遠端複製');
+  String get allowRemoteCopyDesc =>
+      _t('允许内网其他终端复制图片', 'Allow other devices to copy images', '允許內網其他終端複製圖片');
+  String get remoteExcludeFailed => _t(
+    '远程排除失败，请确认共享终端已开启该功能',
+    'Remote exclude failed; make sure it is enabled on the sharing device',
+    '遠端排除失敗，請確認共享終端已開啟該功能',
+  );
   String get filesAndDirs => _t('文件与目录', 'Files & Folders', '文件與目錄');
   String get recursiveScan => _t('包含子文件夹', 'Include Subfolders', '包含子文件夾');
   String get recursiveScanDesc => _t(
@@ -180,6 +206,7 @@ class AppLocalizations {
   String get ctrlDelExcludeHint =>
       _t('Ctrl+Del：排除播放', 'Ctrl + Del: Exclude', 'Ctrl+Del：排除播放');
   String get excludeFromPlay => _t('排除播放', 'Exclude', '排除播放');
+  String get removeFromManage => _t('取消管理', 'Remove from Management', '取消管理');
   String get deleteFile => _t('实际删除', 'Delete File', '實際刪除');
   String get second => _t('秒', 's', '秒');
   String get deleteFromDisk => _t('从磁盘删除', 'Delete from Disk', '從磁盤刪除');

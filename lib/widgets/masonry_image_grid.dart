@@ -146,6 +146,12 @@ class MasonryImageGrid extends StatelessWidget {
   final Color singleActionColor;
   final String? singleActionTooltip;
 
+  /// 单按钮模式下额外追加在右侧的操作（如远程复制），为空时不显示
+  final void Function(int index)? onExtraAction;
+  final IconData? extraActionIcon;
+  final Color? extraActionColor;
+  final String? extraActionTooltip;
+
   // ── 以下为四按钮模式（已排除图片页）所需的参数 ──
   final void Function(int index)? onPrimaryAction;
   final void Function(int index)? onMove;
@@ -176,6 +182,10 @@ class MasonryImageGrid extends StatelessWidget {
     this.singleActionIcon = Icons.delete_outline,
     this.singleActionColor = Colors.redAccent,
     this.singleActionTooltip,
+    this.onExtraAction,
+    this.extraActionIcon,
+    this.extraActionColor,
+    this.extraActionTooltip,
     this.onPrimaryAction,
     this.onMove,
     this.onCopy,
@@ -248,6 +258,12 @@ class MasonryImageGrid extends StatelessWidget {
                       singleActionIcon: singleActionIcon,
                       singleActionColor: singleActionColor,
                       singleActionTooltip: singleActionTooltip,
+                      onExtra: onExtraAction == null
+                          ? null
+                          : () => onExtraAction!(index),
+                      extraIcon: extraActionIcon,
+                      extraColor: extraActionColor,
+                      extraTooltip: extraActionTooltip,
                       onPrimary: onPrimaryAction == null
                           ? null
                           : () => onPrimaryAction!(index),
@@ -299,6 +315,12 @@ class _MasonryImageCard extends StatefulWidget {
   final Color singleActionColor;
   final String? singleActionTooltip;
 
+  /// 单按钮模式下并排追加的第二个操作（可为空）
+  final VoidCallback? onExtra;
+  final IconData? extraIcon;
+  final Color? extraColor;
+  final String? extraTooltip;
+
   // ── 四按钮模式（已排除图片页）所需的回调与样式 ──
   final VoidCallback? onPrimary;
   final VoidCallback? onMove;
@@ -318,6 +340,10 @@ class _MasonryImageCard extends StatefulWidget {
     required this.singleActionIcon,
     required this.singleActionColor,
     this.singleActionTooltip,
+    this.onExtra,
+    this.extraIcon,
+    this.extraColor,
+    this.extraTooltip,
     this.onPrimary,
     this.onMove,
     this.onCopy,
@@ -392,11 +418,25 @@ class _MasonryImageCardState extends State<_MasonryImageCard> {
       return Container(
         alignment: Alignment.bottomRight,
         padding: const EdgeInsets.all(8),
-        child: _iconButton(
-          widget.singleActionIcon,
-          widget.singleActionColor,
-          widget.singleActionTooltip ?? loc.deleteImage,
-          widget.onDelete,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _iconButton(
+              widget.singleActionIcon,
+              widget.singleActionColor,
+              widget.singleActionTooltip ?? loc.deleteImage,
+              widget.onDelete,
+            ),
+            if (widget.onExtra != null) ...[
+              const SizedBox(width: 8),
+              _iconButton(
+                widget.extraIcon ?? Icons.content_copy,
+                widget.extraColor ?? Colors.greenAccent,
+                widget.extraTooltip ?? loc.copyTo,
+                widget.onExtra!,
+              ),
+            ],
+          ],
         ),
       );
     }

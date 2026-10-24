@@ -9,9 +9,12 @@ import 'package:provider/provider.dart';
 import 'package:image/image.dart' as img;
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/providers/lan_provider.dart';
 import 'package:frame_flow/models/image_item.dart';
+import 'package:frame_flow/models/lan_models.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 import 'package:frame_flow/services/copy_service.dart';
+import 'package:frame_flow/services/lan_client_service.dart';
 import 'package:frame_flow/services/fullscreen_service.dart';
 import 'package:frame_flow/utils/rotated_fit.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
@@ -376,6 +379,47 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted) return;
     final loc = AppLocalizations.of(context);
     _showDeleteNotification(ok ? loc.copySuccess : loc.copyFailed);
+  }
+
+  /// 排除当前远端图片：请求共享终端把它记入“已排除文件”，不删除文件
+  Future<void> _excludeCurrentRemoteImage() async {
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    if (slideProvider.images.isEmpty) return;
+    final index = slideProvider.currentIndex;
+    final item = slideProvider.images[index];
+    if (!item.isRemote) return;
+
+    final remoteId = item.remoteId ?? '';
+    final sep = remoteId.indexOf('/');
+    final folderId = sep > 0 ? remoteId.substring(0, sep) : '';
+    final relativeId = sep > 0 ? remoteId.substring(sep + 1) : '';
+    final device = Provider.of<LanProvider>(
+      context,
+      listen: false,
+    ).deviceById(item.deviceId ?? '');
+    if (device == null || folderId.isEmpty || relativeId.isEmpty) {
+      _showDeleteNotification(AppLocalizations.of(context).remoteExcludeFailed);
+      return;
+    }
+
+    final ok = await LanClientService.instance.excludeImage(
+      device,
+      folderId: folderId,
+      id: relativeId,
+    );
+    if (!mounted) return;
+    final loc = AppLocalizations.of(context);
+    if (!ok) {
+      _showDeleteNotification(loc.remoteExcludeFailed);
+      return;
+    }
+
+    slideProvider.removeImage(index);
+    if (slideProvider.images.isEmpty) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+    _showDeleteNotification(loc.excluded);
   }
 
   /// 计算本次实际使用的删除行为：[invert] 为 true 时取与设置相反的一项。
@@ -1692,6 +1736,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
 
         final currentItem = slideProvider.images[slideProvider.currentIndex];
+        // 远端图片可执行的操作由共享终端当前开放的权限决定
+        final remoteCaps = currentItem.isRemote
+            ? Provider.of<LanProvider>(
+                context,
+                listen: false,
+              ).capabilitiesFor(currentItem.deviceId ?? '')
+            : RemoteCapabilities.none;
 
         return Scaffold(
           backgroundColor: settings.background,
@@ -1873,11 +1924,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           : _enterFullscreen,
                                     ),
                                   ),
-                                // 远端图片为只读：不显示删除按钮，改为复制到本机按钮
-                                // （位置与本地图片的排除/删除按钮保持一致）
-                                if (slideProvider
-                                    .images[slideProvider.currentIndex]
-                                    .isRemote)
+                                // 远端图片：按共享终端开放的权限显示“排除 / 复制”，
+                                // 排除在前、复制在后；两者都未开放时不显示
+                                if (currentItem.isRemote && remoteCaps.exclude)
+                                  Tooltip(
+                                    message: AppLocalizations.of(
+                                      context,
+                                    ).excludeFromPlay,
+                                    child: IconButton(
+                                      icon: const Icon(
+                                        Icons.block,
+                                        color: Colors.orange,
+                                      ),
+                                      onPressed: _excludeCurrentRemoteImage,
+                                    ),
+                                  ),
+                                if (currentItem.isRemote && remoteCaps.copy)
                                   Tooltip(
                                     message: AppLocalizations.of(
                                       context,
@@ -1889,8 +1951,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       ),
                                       onPressed: _copyCurrentImage,
                                     ),
-                                  )
-                                else
+                                  ),
+                                // 本地图片保持排除/删除按钮（跟随删除行为设置）
+                                if (!currentItem.isRemote)
                                   Tooltip(
                                     message:
                                         settings.deleteAction ==

@@ -67,6 +67,9 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 共享文件夹封面缩略图地址（ref.key -> 缩略图 URL）
   final Map<String, String?> _folderCovers = {};
 
+  /// 远端设备允许的操作（deviceId -> 能力），未探测到前一律视为不支持
+  final Map<String, RemoteCapabilities> _capabilities = {};
+
   /// 正在获取封面的文件夹，避免并发重复请求
   final Set<String> _coverLoading = {};
 
@@ -142,6 +145,34 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   bool isDeviceReachable(String deviceId) => _reachable[deviceId] ?? false;
 
+  /// 远端设备允许的操作；未探测到时视为全部不支持
+  RemoteCapabilities capabilitiesFor(String deviceId) =>
+      _capabilities[deviceId] ?? RemoteCapabilities.none;
+
+  /// 主动刷新某台设备的能力（进入共享文件夹前调用），返回最新结果
+  Future<RemoteCapabilities> refreshCapabilities(LanDevice device) async {
+    final info = await LanClientService.instance.fetchInfo(device);
+    if (info != null) {
+      _updateCapabilities(device.id, info);
+      if (!_disposed) notifyListeners();
+    }
+    return capabilitiesFor(device.id);
+  }
+
+  void _updateCapabilities(String deviceId, Map<String, dynamic> info) {
+    final caps = RemoteCapabilities(
+      exclude: info['rx'] == true,
+      copy: info['rc'] == true,
+    );
+    final current = _capabilities[deviceId];
+    if (current != null &&
+        current.exclude == caps.exclude &&
+        current.copy == caps.copy) {
+      return;
+    }
+    _capabilities[deviceId] = caps;
+  }
+
   /// 共享文件夹的封面缩略图地址，尚未取回时为 null
   String? coverUrlFor(String folderKey) => _folderCovers[folderKey];
 
@@ -168,6 +199,7 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
         resolveDevice(ref),
       );
       _reachable[ref.deviceId] = info != null;
+      if (info != null) _updateCapabilities(ref.deviceId, info);
     } finally {
       _probing.remove(ref.deviceId);
     }
@@ -210,6 +242,7 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
       return false;
     }
     _reachable[ref.deviceId] = true;
+    _updateCapabilities(ref.deviceId, info);
     final folders = await LanClientService.instance.fetchFolders(device);
     if (folders == null) return false;
 
@@ -504,6 +537,7 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
       )
       ..add(device);
     _reachable[device.id] = true;
+    _updateCapabilities(device.id, info);
     _setError(LanError.none);
     notifyListeners();
     return device;
@@ -547,6 +581,10 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
           deviceName: _settings.deviceName,
           folderPaths: () => sharedLocalFolders,
           recursiveScan: () => _settings.recursiveScan,
+          excludedPaths: () => _settings.excludedPaths,
+          remoteExcludeEnabled: () => _settings.allowRemoteExclude,
+          remoteCopyEnabled: () => _settings.allowRemoteCopy,
+          onExcludedPath: _settings.addExcludedPath,
         );
         _sharing = true;
         if (_error == LanError.serverStartFailed) {
@@ -600,6 +638,7 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
       final device = _manual[i];
       final info = await LanClientService.instance.fetchInfo(device);
       if (info == null) continue;
+      _updateCapabilities(device.id, info);
       _manual[i] = device.copyWith(
         name: (info['name'] as String?)?.trim().isNotEmpty == true
             ? info['name'] as String

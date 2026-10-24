@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/models/lan_models.dart';
+import 'package:frame_flow/providers/lan_provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/screens/player_screen.dart';
@@ -219,6 +220,9 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
   /// 移动端当前选中的图片；选中后显示右下角的复制按钮
   int? _selectedIndex;
 
+  /// 共享终端允许的远程操作，进入页面时刷新一次
+  RemoteCapabilities _caps = RemoteCapabilities.none;
+
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
   /// 排序方式：null 表示使用服务端默认顺序
@@ -258,7 +262,20 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
     super.initState();
     _restoreSortMode();
     _loadFirstPage();
+    _refreshCapabilities();
     HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
+  }
+
+  /// 进入页面时向远端确认当前允许的操作，按钮按结果展示
+  Future<void> _refreshCapabilities() async {
+    final lan = Provider.of<LanProvider>(context, listen: false);
+    final caps = await lan.refreshCapabilities(widget.device);
+    if (!mounted) return;
+    setState(() {
+      _caps = caps;
+      // 能力变化后旧的选中态可能指向不再有按钮的图片
+      _selectedIndex = null;
+    });
   }
 
   /// 该共享文件夹的持久化键，与 [SharedFolderRef.key] 保持一致
@@ -577,6 +594,31 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
     _showSnack(ok ? loc.copySuccess : loc.copyFailed);
   }
 
+  /// 请求共享终端把图片加入其“已排除文件”（仅排除播放，不删除文件）
+  Future<void> _excludeImage(ImageItem item) async {
+    final loc = AppLocalizations.of(context);
+    final remoteId = item.remoteId ?? '';
+    final sep = remoteId.indexOf('/');
+    final relativeId = sep > 0 ? remoteId.substring(sep + 1) : '';
+    if (relativeId.isEmpty) return;
+
+    final ok = await LanClientService.instance.excludeImage(
+      widget.device,
+      folderId: widget.folder.id,
+      id: relativeId,
+    );
+    if (!mounted) return;
+    if (!ok) {
+      _showSnack(loc.remoteExcludeFailed);
+      return;
+    }
+    setState(() {
+      _items.removeWhere((entry) => entry.key == item.key);
+      if (_total > 0) _total--;
+    });
+    _showSnack(loc.excluded);
+  }
+
   /// 远端文件名只保留 basename，空名或相对路径片段则生成兜底名称
   String _fileNameFor(ImageItem item, int index) {
     return CopyService.fileNameFor(item, index);
@@ -798,7 +840,7 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
         backgroundColor: const Color(0xFF16213e),
         elevation: 0,
         actions: [
-          if (_items.isNotEmpty) ...[
+          if (_items.isNotEmpty && _caps.copy) ...[
             IconButton(
               tooltip: loc.copyAllTo,
               icon: _copyingAll
@@ -834,27 +876,44 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
       );
     }
 
+    // 两个远程开关都关闭时，图片上不显示任何操作按钮
+    final allowExclude = _caps.exclude;
+    final allowCopy = _caps.copy;
+    final hasActions = allowExclude || allowCopy;
+
     return MasonryImageGrid(
       items: _items,
       selectedIndex: _selectedIndex,
       onTap: (index) {
-        // 桌面端悬停即可看到复制按钮，点按直接进入播放；
-        // 手机端没有悬停，第一次点按先显示复制按钮，再次点按才进入播放
-        if (!_isMobile || _selectedIndex == index) {
+        // 桌面端悬停即可看到操作按钮，点按直接进入播放；
+        // 手机端没有悬停，第一次点按先显示操作按钮，再次点按才进入播放
+        if (!hasActions || !_isMobile || _selectedIndex == index) {
           _startPlayback(index);
         } else {
           setState(() => _selectedIndex = index);
         }
       },
       onLongPress: _startPlayback,
+      // 排除在前、复制在后；只开启一项时该按钮独占
       onDelete: (index) {
-        _copyImage(_items[index]);
+        if (allowExclude) {
+          _excludeImage(_items[index]);
+        } else {
+          _copyImage(_items[index]);
+        }
         if (mounted) setState(() => _selectedIndex = null);
       },
+      showOverlay: hasActions,
       singleActionOverlay: true,
-      singleActionIcon: Icons.content_copy,
-      singleActionColor: Colors.greenAccent,
-      singleActionTooltip: loc.copyTo,
+      singleActionIcon: allowExclude ? Icons.block : Icons.content_copy,
+      singleActionColor: allowExclude ? Colors.orange : Colors.greenAccent,
+      singleActionTooltip: allowExclude ? loc.excludeFromPlay : loc.copyTo,
+      onExtraAction: allowExclude && allowCopy
+          ? (index) => _copyImage(_items[index])
+          : null,
+      extraActionIcon: Icons.content_copy,
+      extraActionColor: Colors.greenAccent,
+      extraActionTooltip: loc.copyTo,
       hasMore: _items.length < _total,
       onLoadMore: _loadMore,
     );

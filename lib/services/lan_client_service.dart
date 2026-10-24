@@ -49,6 +49,29 @@ class LanClientService {
     }
   }
 
+  /// 请求远端设备把某张图片加入排除列表（仅排除播放，不删除文件）
+  ///
+  /// 远端未开启“允许远程排除播放”或校验失败时返回 false。
+  Future<bool> excludeImage(
+    LanDevice device, {
+    required String folderId,
+    required String id,
+  }) async {
+    final uri = _api(device, LanProtocol.excludePath, {
+      'folder': folderId,
+      'id': id,
+    });
+    try {
+      final request = await _http.postUrl(uri).timeout(_dataTimeout);
+      request.contentLength = 0;
+      final response = await request.close().timeout(_dataTimeout);
+      await response.drain<void>();
+      return response.statusCode == HttpStatus.ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 读取远端共享的文件夹列表
   Future<List<RemoteFolder>?> fetchFolders(LanDevice device) async {
     final uri = Uri.parse('${device.baseUrl}${LanProtocol.foldersPath}');

@@ -58,8 +58,9 @@ class _SortedCache {
 
 /// 局域网 HTTP 图片服务。
 ///
-/// 只读：仅提供共享文件夹内的图片元数据、缩略图与原图，
-/// 不提供任何删除 / 修改接口。
+/// 默认只读：仅提供共享文件夹内的图片元数据、缩略图与原图。
+/// 用户开启“允许远程排除播放”后，额外提供一个排除接口；
+/// 该接口只会把文件记入排除列表，不会删除磁盘文件。
 class LanServerService {
   static final LanServerService instance = LanServerService._();
 
@@ -77,6 +78,10 @@ class LanServerService {
   String _deviceName = 'FrameFlow';
   List<String> Function()? _folderPaths;
   bool Function()? _recursiveScan;
+  List<String> Function()? _excludedPaths;
+  bool Function()? _remoteExcludeEnabled;
+  bool Function()? _remoteCopyEnabled;
+  void Function(String path)? _onExcludedPath;
   final Map<String, _FolderCache> _folderCache = {};
 
   /// 排序结果缓存，键为「目录|排序方式|方向|随机种子」
@@ -94,11 +99,19 @@ class LanServerService {
     required String deviceName,
     required List<String> Function() folderPaths,
     required bool Function() recursiveScan,
+    required List<String> Function() excludedPaths,
+    required bool Function() remoteExcludeEnabled,
+    required bool Function() remoteCopyEnabled,
+    required void Function(String path) onExcludedPath,
   }) async {
     _deviceId = deviceId;
     _deviceName = deviceName;
     _folderPaths = folderPaths;
     _recursiveScan = recursiveScan;
+    _excludedPaths = excludedPaths;
+    _remoteExcludeEnabled = remoteExcludeEnabled;
+    _remoteCopyEnabled = remoteCopyEnabled;
+    _onExcludedPath = onExcludedPath;
 
     if (_server != null) return;
 
@@ -148,6 +161,9 @@ class LanServerService {
         case LanProtocol.thumbPath:
           await _serveThumb(uri, response);
           return;
+        case LanProtocol.excludePath:
+          await _serveExclude(request, uri, response);
+          return;
         default:
           response.statusCode = HttpStatus.notFound;
           response.write('Not Found');
@@ -172,6 +188,9 @@ class LanServerService {
       'port': _port,
       'folders': _folderPaths?.call().length ?? 0,
       'platform': Platform.operatingSystem,
+      // 允许远端执行的操作，客户端据此决定按钮是否显示
+      'rx': _remoteExcludeEnabled?.call() ?? false,
+      'rc': _remoteCopyEnabled?.call() ?? false,
     };
   }
 
@@ -207,7 +226,12 @@ class LanServerService {
     if (Platform.isAndroid) {
       final items = await MediaStoreService.getFolderImages(folder);
       final result =
-          items.where((item) => _isSupportedImage(item.path)).toList()
+          items
+              .where(
+                (item) =>
+                    _isSupportedImage(item.path) && !_isExcluded(item.path),
+              )
+              .toList()
             ..sort((a, b) => a.name.compareTo(b.name));
       return result;
     }
@@ -221,7 +245,9 @@ class LanServerService {
       recursive: recursive,
       followLinks: false,
     )) {
-      if (entity is File && _isSupportedImage(entity.path)) {
+      if (entity is File &&
+          _isSupportedImage(entity.path) &&
+          !_isExcluded(entity.path)) {
         files.add(entity);
       }
     }
@@ -546,6 +572,66 @@ class LanServerService {
     await response.close();
   }
 
+  /// 远程排除播放：仅把文件记入本机排除列表，不删除磁盘文件。
+  ///
+  /// 请求方式必须是 POST；未开启“允许远程排除播放”时拒绝，
+  /// 且只能排除当前共享目录中真实列出的图片（id 经过目录内校验）。
+  Future<void> _serveExclude(
+    HttpRequest request,
+    Uri uri,
+    HttpResponse response,
+  ) async {
+    if (request.method != 'POST') {
+      response.statusCode = HttpStatus.methodNotAllowed;
+      await response.close();
+      return;
+    }
+    if (!(_remoteExcludeEnabled?.call() ?? false)) {
+      response.statusCode = HttpStatus.forbidden;
+      response.write('Remote Exclude Disabled');
+      await response.close();
+      return;
+    }
+
+    final root = _folderById(uri.queryParameters['folder']);
+    final fullPath = root == null
+        ? null
+        : _resolveWithin(root, uri.queryParameters['id'] ?? '');
+    if (root == null || fullPath == null) {
+      response.statusCode = HttpStatus.notFound;
+      await response.close();
+      return;
+    }
+
+    // 已排除过则直接成功，保证请求重试是幂等的
+    if (_isExcluded(fullPath)) {
+      await _writeJson(response, {'ok': true});
+      return;
+    }
+
+    // 只允许排除该共享目录中确实存在的图片
+    final images = await _imagesForPath(root);
+    final relative = _relativeTo(root, fullPath);
+    final exists = images.any(
+      (item) => _relativeTo(root, item.path) == relative,
+    );
+    if (!exists) {
+      response.statusCode = HttpStatus.notFound;
+      await response.close();
+      return;
+    }
+
+    // 本机其他逻辑按原始路径比较，Windows 下需还原为反斜杠分隔
+    final storedPath = Platform.isWindows
+        ? fullPath.replaceAll('/', '\\')
+        : fullPath;
+    _onExcludedPath?.call(storedPath);
+    // 排除后目录与排序缓存失效，后续列表立即反映结果
+    _folderCache.remove(root);
+    _sortCache.removeWhere((key, _) => key.startsWith('$root|'));
+    await _writeJson(response, {'ok': true});
+  }
+
   Future<void> _writeJson(HttpResponse response, Object data) async {
     response.statusCode = HttpStatus.ok;
     response.headers.contentType = ContentType.json;
@@ -577,6 +663,17 @@ class LanServerService {
     if (dot == -1) return false;
     final ext = path.substring(dot + 1).toLowerCase();
     return ImageScanService.supportedExtensions.contains(ext);
+  }
+
+  /// 判断某个绝对路径是否已被本机排除播放
+  bool _isExcluded(String path) {
+    final list = _excludedPaths?.call();
+    if (list == null || list.isEmpty) return false;
+    final normalized = path.replaceAll('\\', '/');
+    for (final item in list) {
+      if (item.replaceAll('\\', '/') == normalized) return true;
+    }
+    return false;
   }
 
   static String _folderName(String path) {

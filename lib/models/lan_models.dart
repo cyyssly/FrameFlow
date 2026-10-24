@@ -49,6 +49,19 @@ class LanDevice {
   }
 }
 
+/// 远端设备允许本机执行的操作
+class RemoteCapabilities {
+  /// 是否允许远程排除播放
+  final bool exclude;
+
+  /// 是否允许远程复制图片
+  final bool copy;
+
+  const RemoteCapabilities({this.exclude = false, this.copy = false});
+
+  static const RemoteCapabilities none = RemoteCapabilities();
+}
+
 /// 远端设备上的共享文件夹
 class RemoteFolder {
   /// 服务端生成的稳定标识，与文件夹在列表中的位置无关

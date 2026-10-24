@@ -8,6 +8,7 @@ import 'package:frame_flow/screens/settings_screen.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/providers/lan_provider.dart';
+import 'package:frame_flow/services/desktop_tray_service.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 import 'dart:io';
 
@@ -41,6 +42,9 @@ void main() async {
     slide: slideProvider,
   );
   await lanProvider.initialize();
+
+  // 桌面端：关闭窗口时按设置收起到系统托盘，而不是直接退出
+  await DesktopTrayService(settingsProvider).initialize();
 
   runApp(
     MultiProvider(

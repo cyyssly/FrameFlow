@@ -21,6 +21,9 @@ class LanProtocol {
   static const String imagePath = '/api/v1/image';
   static const String thumbPath = '/api/v1/thumb';
 
+  /// 远程排除播放（仅记录排除，不删除文件）
+  static const String excludePath = '/api/v1/exclude';
+
   static const String beaconType = 'beacon';
   static const String probeType = 'probe';
 }

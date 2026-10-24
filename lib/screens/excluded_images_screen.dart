@@ -13,7 +13,13 @@ import 'package:frame_flow/widgets/masonry_image_grid.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 class ExcludedImagesScreen extends StatefulWidget {
-  const ExcludedImagesScreen({super.key});
+  const ExcludedImagesScreen({super.key, this.folderName, this.paths});
+
+  /// 分组名称（手机端为目录名，桌面端为完整路径），为空时显示通用标题
+  final String? folderName;
+
+  /// 只显示这些已排除文件；为空时显示全部已排除文件
+  final List<String>? paths;
 
   @override
   State<ExcludedImagesScreen> createState() => _ExcludedImagesScreenState();
@@ -71,8 +77,12 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
 
   void _loadExcludedImages() {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
+    // 从某个已排除分组进入时只显示该分组的文件
+    final source = widget.paths ?? settings.excludedPaths;
     final items = <ImageItem>[];
-    for (final path in settings.excludedPaths) {
+    final seen = <String>{};
+    for (final path in source) {
+      if (!seen.add(path)) continue;
       final file = File(path);
       if (file.existsSync()) {
         items.add(
@@ -213,7 +223,8 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
   // ── 批量操作 ──
   Future<void> _restoreAll() async {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    settings.clearExcludedPaths();
+    // 只恢复当前页面展示的文件（分组页进入时可能只是全部已排除文件的一部分）
+    settings.removeExcludedPaths(_excludedItems.map((e) => e.path).toList());
     setState(() => _excludedItems.clear());
     _showSnack(AppLocalizations.of(context).allImagesRestored);
   }
@@ -227,7 +238,7 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
       return;
     }
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    settings.clearExcludedPaths();
+    settings.removeExcludedPaths(paths);
     setState(() => _excludedItems.clear());
     _showSnack(AppLocalizations.of(context).deletedAllToTrash);
   }
@@ -247,7 +258,7 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
       return;
     }
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    settings.clearExcludedPaths();
+    settings.removeExcludedPaths(items.map((e) => e.path).toList());
     setState(() => _excludedItems.clear());
     _showSnack(AppLocalizations.of(context).movedAllTo);
   }
@@ -286,7 +297,7 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(loc.excludedFolder),
+          title: Text(widget.folderName ?? loc.excludedFolder),
           centerTitle: true,
           backgroundColor: const Color(0xFF16213e),
           actions: [

@@ -132,7 +132,17 @@ class _LanDevicesScreenState extends State<LanDevicesScreen> {
             contentPadding: const EdgeInsets.symmetric(horizontal: 16),
             secondary: const Icon(Icons.wifi_tethering),
             title: Text(loc.lanShareTitle),
-            subtitle: Text(loc.lanShareDesc),
+            // 副标题直接显示本机访问地址；取不到地址时退回功能说明
+            subtitle: lan.localAddresses.isEmpty
+                ? Text(loc.lanShareDesc)
+                : SelectableText(
+                    loc.lanLocalAddressWith(
+                      lan.localAddresses
+                          .map((address) => 'http://$address:${lan.sharePort}')
+                          .join('\n'),
+                    ),
+                    style: const TextStyle(fontSize: 12, color: _hintColor),
+                  ),
             activeThumbColor: const Color(0xFFe94560),
             value: settings.lanShareEnabled,
             onChanged: (value) {
@@ -141,6 +151,36 @@ class _LanDevicesScreenState extends State<LanDevicesScreen> {
               settings.setLanShareEnabled(value);
             },
           ),
+          // 允许其他终端对本机共享图片执行的远程操作（默认关闭）
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            secondary: const Icon(Icons.visibility_off_outlined),
+            title: Text(loc.allowRemoteExclude),
+            subtitle: Text(loc.allowRemoteExcludeDesc),
+            activeThumbColor: const Color(0xFFe94560),
+            value: settings.allowRemoteExclude,
+            onChanged: (value) => settings.setAllowRemoteExclude(value),
+          ),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            secondary: const Icon(Icons.file_copy_outlined),
+            title: Text(loc.allowRemoteCopy),
+            subtitle: Text(loc.allowRemoteCopyDesc),
+            activeThumbColor: const Color(0xFFe94560),
+            value: settings.allowRemoteCopy,
+            onChanged: (value) => settings.setAllowRemoteCopy(value),
+          ),
+          // 桌面端：关闭窗口时收起到托盘，便于其他终端继续浏览本机图片
+          if (Platform.isWindows)
+            SwitchListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              secondary: const Icon(Icons.move_to_inbox),
+              title: Text(loc.closeToTray),
+              subtitle: Text(loc.closeToTrayDesc),
+              activeThumbColor: const Color(0xFFe94560),
+              value: settings.closeToTray,
+              onChanged: (value) => settings.setCloseToTray(value),
+            ),
           if (lan.error == LanError.serverStartFailed)
             ListTile(
               dense: true,
@@ -150,29 +190,6 @@ class _LanDevicesScreenState extends State<LanDevicesScreen> {
                 style: const TextStyle(color: Colors.redAccent),
               ),
             ),
-          // 关闭共享时也保留本机地址，方便用户随时查看
-          Padding(
-            // 与下方常亮提示的 16dp 边距对齐
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.link, size: 18, color: _hintColor),
-                const SizedBox(width: 8),
-                Expanded(
-                  // 标题与首个地址同一行，多个地址后续逐行排列
-                  child: SelectableText(
-                    loc.lanLocalAddressWith(
-                      lan.localAddresses
-                          .map((address) => 'http://$address:${lan.sharePort}')
-                          .join('\n'),
-                    ),
-                    style: const TextStyle(fontSize: 12, color: _hintColor),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );

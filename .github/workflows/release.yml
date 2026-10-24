@@ -181,7 +181,21 @@ jobs:
       - name: List artifacts
         run: ls -l dist
 
+      # 仓库内存在对应版本的说明文档时，用它作为 Release 正文；
+      # 找不到则回退到 GitHub 自动生成的变更列表
+      - name: Resolve release notes
+        id: notes
+        run: |
+          NOTES="release/RELEASE_NOTES_${GITHUB_REF_NAME}.md"
+          if [ -f "$NOTES" ]; then
+            echo "body_path=$NOTES" >> "$GITHUB_OUTPUT"
+            echo "Using $NOTES"
+          else
+            echo "No release notes file, falling back to generated notes"
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.body_path }}

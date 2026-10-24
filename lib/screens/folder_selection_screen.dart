@@ -460,28 +460,6 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     }
   }
 
-  /// 全部排除：把已选文件夹全部移出播放列表
-  void _excludeAll() {
-    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
-    final settingsProvider = Provider.of<SettingsProvider>(
-      context,
-      listen: false,
-    );
-    slideProvider.clearFolderPaths();
-    settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
-
-    // 清除所有缓存的统计信息
-    setState(() {
-      _folderStats.clear();
-      _scanningFolders.clear();
-    });
-  }
-
-  /// 排除全部共享文件夹
-  void _excludeSharedFolders() {
-    Provider.of<SettingsProvider>(context, listen: false).clearSharedFolders();
-  }
-
   /// 打开“添加共享源”：先选择设备，再进入该设备的共享文件夹列表勾选
   Future<void> _addShareSource() async {
     if (_isAddingShareSource) return;
@@ -860,16 +838,12 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       if (addTopDivider) const Divider(height: 1, color: Colors.grey),
       _buildSectionHeader(
         title: loc.excludedFilesSection,
+        actionsInline: true,
         actions: [
           _actionButton(
             tooltip: loc.restoreAll,
             icon: const Icon(Icons.restore, color: Colors.orange),
             onPressed: () => _restoreExcludedGroup(allPaths),
-          ),
-          _actionButton(
-            tooltip: loc.deleteAll,
-            icon: const Icon(Icons.delete_outline, color: Colors.red),
-            onPressed: () => _deleteExcludedGroup(allPaths),
           ),
         ],
       ),
@@ -921,7 +895,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => const ExcludedImagesScreen()),
+          MaterialPageRoute(
+            builder: (context) =>
+                ExcludedImagesScreen(folderName: folderName, paths: paths),
+          ),
         );
       },
     );
@@ -930,9 +907,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   /// 恢复某个文件夹下全部已排除文件
   void _restoreExcludedGroup(List<String> paths) {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    for (final path in paths) {
-      settings.removeExcludedPath(path);
-    }
+    settings.removeExcludedPaths(paths);
   }
 
   /// 删除某个文件夹下全部已排除文件（移入回收站）
@@ -947,9 +922,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       return;
     }
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    for (final path in paths) {
-      settings.removeExcludedPath(path);
-    }
+    settings.removeExcludedPaths(paths);
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(loc.deletedAllToTrash)));
@@ -1282,6 +1255,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
                       if (localPaths.isNotEmpty) ...[
                         _buildSectionHeader(
                           title: loc.localFoldersSection,
+                          actionsInline: true,
                           actions: [
                             _actionButton(
                               tooltip: loc.playLocalFolders,
@@ -1290,14 +1264,6 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
                                 color: Colors.green,
                               ),
                               onPressed: _isScanning ? null : _playLocalSection,
-                            ),
-                            _actionButton(
-                              tooltip: loc.excludeLocalFolders,
-                              icon: const Icon(
-                                Icons.block,
-                                color: Colors.orange,
-                              ),
-                              onPressed: _excludeAll,
                             ),
                           ],
                         ),
@@ -1309,6 +1275,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
                       if (sharedFolders.isNotEmpty) ...[
                         _buildSectionHeader(
                           title: loc.sharedFoldersSection,
+                          actionsInline: true,
                           actions: [
                             if (anySharedOffline)
                               _actionButton(
@@ -1327,14 +1294,6 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
                                     ? null
                                     : _playSharedSection,
                               ),
-                            _actionButton(
-                              tooltip: loc.excludeSharedFolders,
-                              icon: const Icon(
-                                Icons.block,
-                                color: Colors.orange,
-                              ),
-                              onPressed: _excludeSharedFolders,
-                            ),
                           ],
                         ),
                         for (final ref in sharedFolders)
@@ -1358,19 +1317,13 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
-                // 操作按钮（手机端宽度有限，隐藏“全部排除”）
+                // 操作按钮
                 const SizedBox(height: 16),
                 Row(
                   children: [
                     Expanded(child: _buildAddFolderButton(loc)),
                     const SizedBox(width: 12),
                     Expanded(child: _buildAddShareSourceButton(loc)),
-                    if (!Platform.isAndroid) ...[
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildExcludeAllButton(loc, slideProvider),
-                      ),
-                    ],
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -1487,7 +1440,16 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   Widget _buildSectionHeader({
     required String title,
     required List<Widget> actions,
+    bool actionsInline = false,
   }) {
+    final titleWidget = Text(
+      title,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.bold,
+        color: Colors.grey,
+      ),
+    );
     return Padding(
       // 右侧留出与 ListTile 内容相同的 4dp 边距，
       // 让标题栏按钮与下方文件夹行右侧按钮处在同一竖列
@@ -1499,17 +1461,13 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey,
-                ),
-              ),
-            ),
-            ...actions,
+            if (actionsInline) ...[
+              titleWidget,
+              ...actions,
+            ] else ...[
+              Expanded(child: titleWidget),
+              ...actions,
+            ],
           ],
         ),
       ),
@@ -1575,8 +1533,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
               : () => _playFolder(path),
         ),
         _actionButton(
-          tooltip: AppLocalizations.of(context).excludeFromPlay,
-          icon: const Icon(Icons.block, color: Colors.orange),
+          tooltip: AppLocalizations.of(context).removeFromManage,
+          icon: const Icon(Icons.remove_circle_outline, color: Colors.orange),
           onPressed: () => _removeFolder(path),
         ),
       ],
@@ -1696,8 +1654,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
                 : () => _playSharedFolder(ref),
           ),
         _actionButton(
-          tooltip: loc.excludeFromPlay,
-          icon: const Icon(Icons.block, color: Colors.orange),
+          tooltip: loc.removeFromManage,
+          icon: const Icon(Icons.remove_circle_outline, color: Colors.orange),
           onPressed: () {
             Provider.of<SettingsProvider>(
               context,
@@ -1757,34 +1715,6 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
           Flexible(
             child: Text(
               loc.addShareSource,
-              style: const TextStyle(fontSize: 16),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExcludeAllButton(AppLocalizations loc, SlideProvider slide) {
-    return ElevatedButton(
-      onPressed: slide.folderPaths.isEmpty ? null : _excludeAll,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xFFd63031),
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 3,
-        shadowColor: const Color(0xFFd63031).withValues(alpha: 0.3),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.block, size: 24),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              loc.excludeAll,
               style: const TextStyle(fontSize: 16),
               overflow: TextOverflow.ellipsis,
             ),
