@@ -11,7 +11,9 @@ import 'package:frame_flow/services/image_scan_service.dart';
 import 'package:frame_flow/services/media_store_service.dart';
 import 'package:frame_flow/screens/player_screen.dart';
 import 'package:frame_flow/widgets/masonry_image_grid.dart';
+import 'package:frame_flow/widgets/browse_layout_icon.dart';
 import 'package:frame_flow/widgets/sort_alphabet_icon.dart';
+import 'package:frame_flow/utils/filename_compare.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 /// 瀑布流排序方式（菜单项）
@@ -60,6 +62,9 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   /// 当前排序方式（默认顺序）
   _SortAction _sortAction = _SortAction.nameAsc;
 
+  /// 当前浏览格式；未单独设置过的文件夹跟随设置页默认值
+  BrowseLayout _browseLayout = BrowseLayout.masonry;
+
   /// 批次代次：每次重新排序都自增，使跨越排序、尚在途中的旧批次作废，
   /// 避免把「旧顺序下的这一批已就绪」错误地记到新顺序的批次边界上。
   int _batchGeneration = 0;
@@ -68,6 +73,7 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   void initState() {
     super.initState();
     _restoreSortMode();
+    _restoreBrowseLayout();
     _loadImages();
     HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
   }
@@ -85,6 +91,29 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
       }
     }
     _sortAction = _actionForPlayOrder(settings.playOrder);
+  }
+
+  /// 恢复该文件夹上次使用的浏览格式；未单独设置时跟随设置页默认值
+  void _restoreBrowseLayout() {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    _browseLayout =
+        SettingsProvider.parseBrowseLayout(
+          settings.localBrowseLayoutFor(widget.folderPath),
+        ) ??
+        settings.browseLayout;
+  }
+
+  /// 切换浏览格式，并记住到当前文件夹
+  void _applyBrowseLayout(BrowseLayout layout) {
+    if (layout == _browseLayout) return;
+    setState(() {
+      _browseLayout = layout;
+      _selectedIndex = null;
+    });
+    Provider.of<SettingsProvider>(
+      context,
+      listen: false,
+    ).setLocalBrowseLayout(widget.folderPath, layout);
   }
 
   /// 设置页播放顺序 → 瀑布流排序方式的映射
@@ -275,9 +304,9 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   void _applySortToAllItems() {
     switch (_sortAction) {
       case _SortAction.nameAsc:
-        _allItems.sort((a, b) => a.name.compareTo(b.name));
+        _allItems.sort((a, b) => compareFileNames(a.name, b.name));
       case _SortAction.nameDesc:
-        _allItems.sort((a, b) => b.name.compareTo(a.name));
+        _allItems.sort((a, b) => compareFileNames(b.name, a.name));
       case _SortAction.timeNewest:
         _allItems.sort(
           (a, b) => _modifiedTimeOf(b).compareTo(_modifiedTimeOf(a)),
@@ -365,11 +394,25 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     );
   }
 
+  /// 排序按钮的图标：直接显示当前选中的排序方式
+  Widget _sortIcon(Color color) {
+    return switch (_sortAction) {
+      _SortAction.nameAsc => SortAlphabetIcon(ascending: true, color: color),
+      _SortAction.nameDesc => SortAlphabetIcon(ascending: false, color: color),
+      _SortAction.timeNewest => Icon(Icons.update, color: color),
+      _SortAction.timeOldest => Icon(Icons.history, color: color),
+      _SortAction.sizeLargest => Icon(Icons.south, color: color),
+      _SortAction.sizeSmallest => Icon(Icons.north, color: color),
+      _SortAction.random => Icon(Icons.shuffle, color: color),
+      _SortAction.newPreferred => Icon(Icons.fiber_new, color: color),
+    };
+  }
+
   /// 排序入口：用一个按钮弹出 8 种排序方式，避免占用过多标题栏空间
   Widget _buildSortMenu(AppLocalizations loc) {
     return PopupMenuButton<_SortAction>(
       tooltip: loc.sortBy,
-      icon: const Icon(Icons.sort, color: Colors.white70),
+      icon: _sortIcon(Colors.white70),
       onSelected: _applySort,
       itemBuilder: (context) => [
         _sortMenuItem(
@@ -453,6 +496,33 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     _showSnack(AppLocalizations.of(context).deletedToTrash);
   }
 
+  /// 卡片短按：桌面端直接播放；手机端按「短按行为」设置执行播放或选中
+  void _handleCardTap(int index) {
+    final isMobile = Platform.isAndroid || Platform.isIOS;
+    if (!isMobile) {
+      _startPlaybackFrom(index);
+      return;
+    }
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    if (settings.mobileTapAction == MobileTapAction.play ||
+        _selectedIndex == index) {
+      _startPlaybackFrom(index);
+    } else {
+      setState(() => _selectedIndex = index);
+    }
+  }
+
+  /// 长按：手机端「播放」模式下用于选中，其余情况直接播放
+  void _handleCardLongPress(int index) {
+    final isMobile = Platform.isAndroid || Platform.isIOS;
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    if (isMobile && settings.mobileTapAction == MobileTapAction.play) {
+      setState(() => _selectedIndex = index);
+      return;
+    }
+    _startPlaybackFrom(index);
+  }
+
   /// 从瀑布流进入幻灯播放。
   ///
   /// 播放范围限定为当前文件夹：使用本次扫描到的全部图片（而不是仅已加载的
@@ -486,9 +556,8 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
     // 卡片右下角按钮的图标/颜色/提示随「删除行为」设置变化，需要随设置重建
-    final deleteExcludes =
-        Provider.of<SettingsProvider>(context, listen: true).deleteAction ==
-        DeleteAction.exclude;
+    final settings = Provider.of<SettingsProvider>(context, listen: true);
+    final deleteExcludes = settings.deleteAction == DeleteAction.exclude;
     // 返回上一页时先退出全屏，避免带着无边框全屏窗口回到上一页
     return PopScope(
       onPopInvokedWithResult: (didPop, result) {
@@ -510,6 +579,10 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
                 tooltip: loc.startPlay,
                 icon: const Icon(Icons.play_arrow),
                 onPressed: () => _startPlaybackFrom(0),
+              ),
+              BrowseLayoutMenuButton(
+                value: _browseLayout,
+                onSelected: _applyBrowseLayout,
               ),
               _buildSortMenu(loc),
             ],
@@ -533,22 +606,13 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
               )
             : MasonryImageGrid(
                 items: _items,
+                fileListInfo: settings.fileListInfo,
+                layout: _browseLayout,
                 selectedIndex: _selectedIndex,
                 hasMore: _items.length < _allItems.length,
                 onLoadMore: _loadMore,
-                onTap: (index) {
-                  // 桌面端悬停即可看到删除按钮，点按直接进入播放；
-                  // 手机端没有悬停，第一次点按先显示删除按钮，再次点按才进入播放
-                  final isMobile = Platform.isAndroid || Platform.isIOS;
-                  if (!isMobile || _selectedIndex == index) {
-                    _startPlaybackFrom(index);
-                  } else {
-                    setState(() {
-                      _selectedIndex = index;
-                    });
-                  }
-                },
-                onLongPress: _startPlaybackFrom,
+                onTap: _handleCardTap,
+                onLongPress: _handleCardLongPress,
                 onDelete: (index) {
                   _applyDeleteAction(_items[index]);
                   if (mounted) setState(() => _selectedIndex = null);

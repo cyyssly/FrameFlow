@@ -444,7 +444,9 @@ class MainActivity : FlutterActivity() {
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DATA,
             MediaStore.Images.Media.WIDTH,
-            MediaStore.Images.Media.HEIGHT
+            MediaStore.Images.Media.HEIGHT,
+            MediaStore.Images.Media.SIZE,
+            MediaStore.Images.Media.DATE_MODIFIED
         )
 
         // 查询条件：相对路径匹配，或 DATA 列以文件夹路径开头
@@ -473,6 +475,8 @@ class MainActivity : FlutterActivity() {
             val dataIdx = it.getColumnIndex(MediaStore.Images.Media.DATA)
             val widthIdx = it.getColumnIndex(MediaStore.Images.Media.WIDTH)
             val heightIdx = it.getColumnIndex(MediaStore.Images.Media.HEIGHT)
+            val sizeIdx = it.getColumnIndex(MediaStore.Images.Media.SIZE)
+            val modifiedIdx = it.getColumnIndex(MediaStore.Images.Media.DATE_MODIFIED)
             if (idIdx < 0) return@use
 
             while (it.moveToNext()) {
@@ -495,7 +499,10 @@ class MainActivity : FlutterActivity() {
                     mapOf(
                         "name" to imagePath.substringAfterLast('/'),
                         "path" to imagePath,
-                        "aspectRatio" to aspectRatio
+                        "aspectRatio" to aspectRatio,
+                        // 文件大小（字节）与修改时间（毫秒），供瀑布流信息块展示
+                        "size" to if (sizeIdx >= 0) it.getLong(sizeIdx) else null,
+                        "modifiedTime" to if (modifiedIdx >= 0) it.getLong(modifiedIdx) * 1000 else null
                     )
                 )
             }

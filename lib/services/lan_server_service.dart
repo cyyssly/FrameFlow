@@ -7,9 +7,11 @@ import 'package:flutter/foundation.dart' show compute;
 import 'package:image/image.dart' as img;
 
 import 'package:frame_flow/models/image_item.dart';
+import 'package:frame_flow/services/image_formats.dart';
 import 'package:frame_flow/services/image_scan_service.dart';
 import 'package:frame_flow/services/lan_protocol.dart';
 import 'package:frame_flow/services/media_store_service.dart';
+import 'package:frame_flow/utils/filename_compare.dart';
 
 /// 缩略图生成任务（可在后台 isolate 执行）
 class _ThumbTask {
@@ -232,7 +234,7 @@ class LanServerService {
                     _isSupportedImage(item.path) && !_isExcluded(item.path),
               )
               .toList()
-            ..sort((a, b) => a.name.compareTo(b.name));
+            ..sort((a, b) => compareFileNames(a.name, b.name));
       return result;
     }
 
@@ -298,8 +300,7 @@ class LanServerService {
               _hash('$seed:${a.path}').compareTo(_hash('$seed:${b.path}')),
         );
     } else if (sort == 'name') {
-      sorted = [...images]
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      sorted = [...images]..sort((a, b) => compareFileNames(a.name, b.name));
       if (descending) sorted = sorted.reversed.toList();
     } else {
       // 时间 / 大小排序需要全量 stat；结果随排序缓存一起复用
@@ -658,12 +659,7 @@ class LanServerService {
     return '${_hash('folder:$normalized')}${_hash('folder2:$normalized')}';
   }
 
-  static bool _isSupportedImage(String path) {
-    final dot = path.lastIndexOf('.');
-    if (dot == -1) return false;
-    final ext = path.substring(dot + 1).toLowerCase();
-    return ImageScanService.supportedExtensions.contains(ext);
-  }
+  static bool _isSupportedImage(String path) => isSupportedImagePath(path);
 
   /// 判断某个绝对路径是否已被本机排除播放
   bool _isExcluded(String path) {

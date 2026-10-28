@@ -162,6 +162,7 @@ class AppLocalizations {
   );
   String get trayShowWindow => _t('显示主界面', 'Show Window', '顯示主界面');
   String get trayExit => _t('退出 FrameFlow', 'Exit FrameFlow', '退出 FrameFlow');
+  String get closeWindow => _t('关闭窗口', 'Close Window', '關閉視窗');
 
   // 内网共享：远程操作权限
   String get allowRemoteExclude =>
@@ -171,21 +172,44 @@ class AppLocalizations {
     'Exclude from playback only; files are never deleted and can be restored',
     '僅排除播放，不會實際刪除，可一鍵恢復',
   );
-  String get allowRemoteCopy => _t('允许远程复制', 'Allow Remote Copy', '允許遠端複製');
-  String get allowRemoteCopyDesc =>
-      _t('允许内网其他终端复制图片', 'Allow other devices to copy images', '允許內網其他終端複製圖片');
+  String get allowRemoteCopy => _t('允许下载', 'Allow Downloads', '允許下載');
+  String get allowRemoteCopyDesc => _t(
+    '允许内网其他终端下载本机图片',
+    'Allow other devices on the LAN to download images from this device',
+    '允許內網其他終端下載本機圖片',
+  );
   String get remoteExcludeFailed => _t(
     '远程排除失败，请确认共享终端已开启该功能',
     'Remote exclude failed; make sure it is enabled on the sharing device',
     '遠端排除失敗，請確認共享終端已開啟該功能',
   );
-  String get filesAndDirs => _t('文件与目录', 'Files & Folders', '文件與目錄');
+  String get filesAndDirs => _t('文件管理', 'File Management', '文件管理');
   String get recursiveScan => _t('包含子文件夹', 'Include Subfolders', '包含子文件夾');
   String get recursiveScanDesc => _t(
     '开启后连子文件夹里的图片一起播放',
     'Play images from subfolders too',
     '開啟後連子文件夾裡的圖片一起播放',
   );
+  String get browseLayout => _t('浏览格式', 'Browse Layout', '瀏覽格式');
+  String get browseLayoutMasonry => _t('瀑布流', 'Masonry', '瀑布流');
+  String get browseLayoutSquare => _t('正方形', 'Square', '正方形');
+  String get browseLayoutLandscape4x3 =>
+      _t('横屏 4:3', 'Landscape 4:3', '橫屏 4:3');
+  String get browseLayoutLandscape16x9 =>
+      _t('横屏 16:9', 'Landscape 16:9', '橫屏 16:9');
+  String get browseLayoutPortrait3x4 => _t('竖屏 3:4', 'Portrait 3:4', '豎屏 3:4');
+  String get browseLayoutPortrait9x16 =>
+      _t('竖屏 9:16', 'Portrait 9:16', '豎屏 9:16');
+  String get fileListInfo => _t('文件列表信息', 'File List Info', '文件列表信息');
+  String get fileListInfoDesc => _t(
+    '选中项显示在卡片下方',
+    'Show the selected field under each grid card',
+    '選中項顯示在卡片下方',
+  );
+  String get fileListInfoNone => _t('不显示', 'None', '不顯示');
+  String get fileListInfoName => _t('文件名', 'Name', '文件名');
+  String get fileListInfoNameDateSize =>
+      _t('文件名+日期+大小', 'Name + Date + Size', '文件名+日期+大小');
   String get showImageInfo => _t('图片信息显示', 'Show Info', '圖片信息顯示');
   String get showImageInfoDesc => _t(
     '文件名/文件大小/分辨率/当前页码',
@@ -200,6 +224,46 @@ class AppLocalizations {
       _t('Ctrl+滚轮：缩放图片', 'Ctrl + Wheel: Zoom', 'Ctrl+滾輪：縮放圖片');
   String get ctrlWheelSwitchHint =>
       _t('Ctrl+滚轮：切换图片', 'Ctrl + Wheel: Switch Image', 'Ctrl+滾輪：切換圖片');
+  String get mobileTapBehavior => _t('短按行为', 'Tap Action', '短按行為');
+  String get mobileTapPlay => _t('播放', 'Play', '播放');
+  String get mobileTapSelect => _t('选中', 'Select', '選中');
+  String get mobileTapPlayDesc => _t('长按选中', 'Long press to select', '長按選中');
+  String get mobileTapSelectDesc =>
+      _t('长按或再次短按播放', 'Long press or tap again to play', '長按或再次短按播放');
+
+  // Windows 桌面端：右键菜单与默认打开方式
+  /// 注册到系统注册表的右键菜单项文字（写入注册表后需重装才会更新）
+  String get contextMenuOpenWith =>
+      _t('用 FrameFlow 打开', 'Open with FrameFlow', '用 FrameFlow 開啟');
+
+  /// ProgID 的文件类型显示名（出现在「打开方式」等系统界面）
+  String get imageFileTypeName =>
+      _t('FrameFlow 图片文件', 'FrameFlow Image', 'FrameFlow 圖片檔案');
+
+  /// 「默认应用」列表中展示的应用说明
+  String get imageBrowserDescription =>
+      _t('FrameFlow 图片浏览器', 'FrameFlow image viewer', 'FrameFlow 圖片瀏覽器');
+  String get addToContextMenu =>
+      _t('添加到右键菜单', 'Add to Context Menu', '添加到右鍵菜單');
+  String get addToContextMenuDesc => _t(
+    '在支持图片格式的右键菜单中增加一项：用 FrameFlow 打开',
+    'Add "Open with FrameFlow" to the context menu of supported image formats',
+    '在支援圖片格式的右鍵菜單中增加一項：用 FrameFlow 打開',
+  );
+  String get contextMenuFailed =>
+      _t('操作失败，请检查系统权限', 'Failed. Check system permissions', '操作失敗，請檢查系統權限');
+  String get setDefaultApp => _t('设为默认打开程序', 'Set as Default App', '設為預設開啟程式');
+  String get setDefaultAppDesc => _t(
+    '请在系统默认应用 > 照片查看器 > 选中 FrameFlow',
+    'Choose FrameFlow in Default Apps > Photo Viewer',
+    '請在系統預設應用程式 > 照片檢視器 > 選中 FrameFlow',
+  );
+  String get defaultAppOpen => _t('去设置', 'Open Settings', '前往設定');
+  String get defaultAppSettingsOpened => _t(
+    '已打开系统「默认应用」页面，请在其中选择 FrameFlow',
+    'Default Apps opened. Please choose FrameFlow there.',
+    '已開啟系統「預設應用程式」頁面，請在其中選擇 FrameFlow',
+  );
   String get deleteBehavior => _t('删除行为', 'Delete', '刪除行為');
   String get ctrlDelDeleteHint =>
       _t('Ctrl+Del：实际删除', 'Ctrl + Del: Delete File', 'Ctrl+Del：實際刪除');

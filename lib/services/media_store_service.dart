@@ -107,10 +107,16 @@ class MediaStoreService {
       return list.map((item) {
         final map = Map<String, dynamic>.from(item as Map);
         final ratio = map['aspectRatio'];
+        final size = map['size'];
+        final modified = map['modifiedTime'];
         return ImageItem(
           name: map['name'] as String,
           path: map['path'] as String,
           aspectRatio: ratio is num ? ratio.toDouble() : null,
+          size: size is num ? size.toInt() : null,
+          modifiedAt: modified is num
+              ? DateTime.fromMillisecondsSinceEpoch(modified.toInt())
+              : null,
         );
       }).toList();
     } catch (e) {

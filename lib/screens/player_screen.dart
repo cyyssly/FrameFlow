@@ -19,6 +19,7 @@ import 'package:frame_flow/services/fullscreen_service.dart';
 import 'package:frame_flow/utils/rotated_fit.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:window_manager/window_manager.dart';
 
 /// 在后台 isolate 中解码图片并取回原始像素尺寸。
 ///
@@ -419,6 +420,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted) Navigator.pop(context);
       return;
     }
+    // 移除当前图后已切到下一张，重置自动播放计时器，
+    // 否则会沿用上一张的到期时间而立刻跳图
+    _startAutoPlay();
     _showDeleteNotification(loc.excluded);
   }
 
@@ -531,6 +535,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       return false;
     } else {
+      // 移除当前图后已切到下一张，重置自动播放计时器，
+      // 避免沿用上一张的到期时间而立刻跳图
+      _startAutoPlay();
       // 显示删除成功提示（使用自定义覆盖层，在全屏模式下也能显示）
       if (mounted) {
         _showDeleteNotification(
@@ -1946,8 +1953,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ).copyTo,
                                     child: IconButton(
                                       icon: const Icon(
-                                        Icons.content_copy,
-                                        color: Colors.greenAccent,
+                                        Icons.download,
+                                        color: Colors.white,
                                       ),
                                       onPressed: _copyCurrentImage,
                                     ),
@@ -1998,6 +2005,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ),
                                   ),
                                 ),
+                                // 桌面端全屏播放时系统标题栏不可见，
+                                // 提供关闭按钮，行为与点击窗口关闭按钮一致
+                                // （由 DesktopTrayService 按设置决定退出或收起到托盘）
+                                if (Platform.isWindows)
+                                  Tooltip(
+                                    message: AppLocalizations.of(
+                                      context,
+                                    ).closeWindow,
+                                    child: IconButton(
+                                      icon: const Icon(Icons.close),
+                                      onPressed: windowManager.close,
+                                    ),
+                                  ),
                               ],
                             ),
                           ),

@@ -19,6 +19,7 @@ import 'package:frame_flow/services/fullscreen_service.dart';
 import 'package:frame_flow/services/lan_client_service.dart';
 import 'package:frame_flow/services/media_store_service.dart';
 import 'package:frame_flow/widgets/masonry_image_grid.dart';
+import 'package:frame_flow/widgets/browse_layout_icon.dart';
 import 'package:frame_flow/widgets/sort_alphabet_icon.dart';
 
 /// 远端设备的共享文件夹列表
@@ -228,6 +229,9 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
   /// 排序方式：null 表示使用服务端默认顺序
   String? _sortKey;
 
+  /// 当前浏览格式；未单独设置过的共享文件夹跟随设置页默认值
+  BrowseLayout _browseLayout = BrowseLayout.masonry;
+
   /// 顺序模式下是否为升序（true = 顺序，false = 逆序）
   bool _nameAscending = true;
 
@@ -261,9 +265,33 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
   void initState() {
     super.initState();
     _restoreSortMode();
+    _restoreBrowseLayout();
     _loadFirstPage();
     _refreshCapabilities();
     HardwareKeyboard.instance.addHandler(_hardwareKeyHandler);
+  }
+
+  /// 恢复该共享文件夹上次使用的浏览格式；未单独设置时跟随设置页默认值
+  void _restoreBrowseLayout() {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    _browseLayout =
+        SettingsProvider.parseBrowseLayout(
+          settings.sharedBrowseLayoutFor(_sharedFolderKey),
+        ) ??
+        settings.browseLayout;
+  }
+
+  /// 切换浏览格式，并记住到当前共享文件夹
+  void _applyBrowseLayout(BrowseLayout layout) {
+    if (layout == _browseLayout) return;
+    setState(() {
+      _browseLayout = layout;
+      _selectedIndex = null;
+    });
+    Provider.of<SettingsProvider>(
+      context,
+      listen: false,
+    ).setSharedBrowseLayout(_sharedFolderKey, layout);
   }
 
   /// 进入页面时向远端确认当前允许的操作，按钮按结果展示
@@ -512,11 +540,32 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
     );
   }
 
+  /// 排序按钮的图标：直接显示当前选中的排序方式
+  Widget _sortIcon(Color color) {
+    final action = _RemoteSortAction.values.firstWhere(_isSortActive);
+    return switch (action) {
+      _RemoteSortAction.nameAsc => SortAlphabetIcon(
+        ascending: true,
+        color: color,
+      ),
+      _RemoteSortAction.nameDesc => SortAlphabetIcon(
+        ascending: false,
+        color: color,
+      ),
+      _RemoteSortAction.timeNewest => Icon(Icons.update, color: color),
+      _RemoteSortAction.timeOldest => Icon(Icons.history, color: color),
+      _RemoteSortAction.sizeLargest => Icon(Icons.south, color: color),
+      _RemoteSortAction.sizeSmallest => Icon(Icons.north, color: color),
+      _RemoteSortAction.random => Icon(Icons.shuffle, color: color),
+      _RemoteSortAction.newPreferred => Icon(Icons.fiber_new, color: color),
+    };
+  }
+
   /// 排序入口：用一个按钮弹出 8 种排序方式，避免占用过多标题栏空间
   Widget _buildSortMenu(AppLocalizations loc) {
     return PopupMenuButton<_RemoteSortAction>(
       tooltip: loc.sortBy,
-      icon: const Icon(Icons.sort, color: Colors.white70),
+      icon: _sortIcon(Colors.white70),
       onSelected: _applySort,
       itemBuilder: (context) => [
         _sortMenuItem(
@@ -783,6 +832,36 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
     );
   }
 
+  /// 卡片短按：桌面端直接播放；手机端按「短按行为」设置执行播放或选中
+  void _handleCardTap(int index) {
+    // 两个远程开关都关闭时没有可显示的按钮，选中无意义，直接播放
+    final hasActions = _caps.exclude || _caps.copy;
+    if (!_isMobile || !hasActions) {
+      _startPlayback(index);
+      return;
+    }
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    if (settings.mobileTapAction == MobileTapAction.play ||
+        _selectedIndex == index) {
+      _startPlayback(index);
+    } else {
+      setState(() => _selectedIndex = index);
+    }
+  }
+
+  /// 长按：手机端「播放」模式下用于选中，其余情况直接播放
+  void _handleCardLongPress(int index) {
+    final hasActions = _caps.exclude || _caps.copy;
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    if (_isMobile &&
+        hasActions &&
+        settings.mobileTapAction == MobileTapAction.play) {
+      setState(() => _selectedIndex = index);
+      return;
+    }
+    _startPlayback(index);
+  }
+
   /// 播放远端文件夹：先把该文件夹的完整元数据取回，再交给播放页
   Future<void> _startPlayback(int index) async {
     if (_startingPlayback) return;
@@ -832,6 +911,7 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
+    final settings = Provider.of<SettingsProvider>(context, listen: true);
     return Scaffold(
       appBar: AppBar(
         // 移动端让文件夹名称紧跟返回按钮，节省横向空间
@@ -840,27 +920,32 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
         backgroundColor: const Color(0xFF16213e),
         elevation: 0,
         actions: [
-          if (_items.isNotEmpty && _caps.copy) ...[
-            IconButton(
-              tooltip: loc.copyAllTo,
-              icon: _copyingAll
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.content_copy, color: Colors.greenAccent),
-              onPressed: _copyingAll ? null : _copyAll,
+          if (_items.isNotEmpty) ...[
+            if (_caps.copy)
+              IconButton(
+                tooltip: loc.copyAllTo,
+                icon: _copyingAll
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download, color: Colors.white),
+                onPressed: _copyingAll ? null : _copyAll,
+              ),
+            BrowseLayoutMenuButton(
+              value: _browseLayout,
+              onSelected: _applyBrowseLayout,
             ),
             _buildSortMenu(loc),
           ],
         ],
       ),
-      body: _buildBody(loc),
+      body: _buildBody(loc, settings),
     );
   }
 
-  Widget _buildBody(AppLocalizations loc) {
+  Widget _buildBody(AppLocalizations loc, SettingsProvider settings) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -883,17 +968,11 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
 
     return MasonryImageGrid(
       items: _items,
+      fileListInfo: settings.fileListInfo,
+      layout: _browseLayout,
       selectedIndex: _selectedIndex,
-      onTap: (index) {
-        // 桌面端悬停即可看到操作按钮，点按直接进入播放；
-        // 手机端没有悬停，第一次点按先显示操作按钮，再次点按才进入播放
-        if (!hasActions || !_isMobile || _selectedIndex == index) {
-          _startPlayback(index);
-        } else {
-          setState(() => _selectedIndex = index);
-        }
-      },
-      onLongPress: _startPlayback,
+      onTap: _handleCardTap,
+      onLongPress: _handleCardLongPress,
       // 排除在前、复制在后；只开启一项时该按钮独占
       onDelete: (index) {
         if (allowExclude) {
@@ -905,14 +984,14 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
       },
       showOverlay: hasActions,
       singleActionOverlay: true,
-      singleActionIcon: allowExclude ? Icons.block : Icons.content_copy,
-      singleActionColor: allowExclude ? Colors.orange : Colors.greenAccent,
+      singleActionIcon: allowExclude ? Icons.block : Icons.download,
+      singleActionColor: allowExclude ? Colors.orange : Colors.white,
       singleActionTooltip: allowExclude ? loc.excludeFromPlay : loc.copyTo,
       onExtraAction: allowExclude && allowCopy
           ? (index) => _copyImage(_items[index])
           : null,
-      extraActionIcon: Icons.content_copy,
-      extraActionColor: Colors.greenAccent,
+      extraActionIcon: Icons.download,
+      extraActionColor: Colors.white,
       extraActionTooltip: loc.copyTo,
       hasMore: _items.length < _total,
       onLoadMore: _loadMore,

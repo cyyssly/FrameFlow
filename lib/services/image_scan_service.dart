@@ -3,19 +3,11 @@ import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/services/image_formats.dart';
 import 'package:frame_flow/services/media_store_service.dart';
 
 /// 图片扫描与元数据读取服务
 class ImageScanService {
-  static const supportedExtensions = {
-    'jpg',
-    'jpeg',
-    'png',
-    'webp',
-    'bmp',
-    'gif',
-  };
-
   /// 扫描文件夹中的图片（Android 走 MediaStore，桌面走文件系统）
   ///
   /// 扫描结果会剔除 [SettingsProvider.excludedPaths] 中记录的图片：
@@ -39,7 +31,7 @@ class ImageScanService {
       // MediaStore 已索引好宽高，直接透传，调用方无需再读原图
       final images = await MediaStoreService.getFolderImages(folderPath);
       return images
-          .where((item) => _isSupportedImage(item.path) && notExcluded(item))
+          .where((item) => isSupportedImagePath(item.path) && notExcluded(item))
           .toList();
     }
 
@@ -57,24 +49,30 @@ class ImageScanService {
       files = entities.whereType<File>().toList();
     }
 
-    return files
-        .where((file) => _isSupportedImage(file.path))
-        .map(
-          (file) => ImageItem(
-            name: file.path.split(Platform.pathSeparator).last,
-            path: file.path,
-          ),
-        )
-        .where(notExcluded)
-        .toList();
-  }
+    final items = <ImageItem>[];
+    for (final file in files) {
+      if (!isSupportedImagePath(file.path)) continue;
+      // 文件大小与修改时间在此读入，避免瀑布流卡片在 build 里同步读盘
+      DateTime? modifiedAt;
+      int? size;
+      try {
+        final stat = await file.stat();
+        modifiedAt = stat.modified;
+        size = stat.size;
+      } catch (_) {
+        // 文件被占用/权限不足时忽略，对应信息显示为「未知」
+      }
+      items.add(
+        ImageItem(
+          name: file.path.split(Platform.pathSeparator).last,
+          path: file.path,
+          modifiedAt: modifiedAt,
+          size: size,
+        ),
+      );
+    }
 
-  /// 判断是否为支持的图片格式
-  static bool _isSupportedImage(String path) {
-    final dotIndex = path.lastIndexOf('.');
-    if (dotIndex == -1) return false;
-    final ext = path.toLowerCase().substring(dotIndex + 1);
-    return supportedExtensions.contains(ext);
+    return items.where(notExcluded).toList();
   }
 
   /// 解析宽高比时最多读取的文件头字节数。

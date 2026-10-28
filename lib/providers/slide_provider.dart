@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/utils/filename_compare.dart';
 
 class SlideProvider extends ChangeNotifier {
   List<ImageItem> _images = [];
@@ -283,7 +284,7 @@ class SlideProvider extends ChangeNotifier {
     int low = 0, high = _images.length;
     while (low < high) {
       final mid = (low + high) ~/ 2;
-      if (_images[mid].name.compareTo(name) < 0) {
+      if (compareFileNames(_images[mid].name, name) < 0) {
         low = mid + 1;
       } else {
         high = mid;
@@ -297,7 +298,7 @@ class SlideProvider extends ChangeNotifier {
     int low = 0, high = _images.length;
     while (low < high) {
       final mid = (low + high) ~/ 2;
-      if (_images[mid].name.compareTo(name) > 0) {
+      if (compareFileNames(_images[mid].name, name) > 0) {
         low = mid + 1;
       } else {
         high = mid;
@@ -419,12 +420,12 @@ class SlideProvider extends ChangeNotifier {
   void sortByPlayOrder(PlayOrder order) {
     switch (order) {
       case PlayOrder.sequential:
-        // 按文件名排序（默认）
-        _images.sort((a, b) => a.name.compareTo(b.name));
+        // 按文件名排序（默认）——中文拼音 + 自然排序
+        _images.sort((a, b) => compareFileNames(a.name, b.name));
         break;
       case PlayOrder.reverseSequential:
         // 按文件名逆序
-        _images.sort((a, b) => b.name.compareTo(a.name));
+        _images.sort((a, b) => compareFileNames(b.name, a.name));
         break;
       case PlayOrder.newestFirst:
         // 按文件修改时间从新到旧

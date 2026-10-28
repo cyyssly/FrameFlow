@@ -40,6 +40,47 @@ enum ImageOrientation {
   followImage, // 跟随图片
 }
 
+/// 手机端瀑布流卡片的短按行为。
+///
+/// 按下标持久化到 SharedPreferences，新增项请追加在末尾。
+enum MobileTapAction {
+  play, // 短按直接播放，长按选中
+  select, // 短按选中，长按或再次短按播放
+}
+
+/// 瀑布流卡片下方展示的文件信息（单选）。
+///
+/// 按下标持久化到 SharedPreferences，新增项请追加在末尾。
+enum FileListInfo {
+  none, // 不显示
+  name, // 文件名
+  nameDateSize, // 文件名 + 日期 + 大小
+}
+
+/// 图片浏览格式（瀑布流或固定画幅）。
+///
+/// 按下标持久化到 SharedPreferences，新增项请追加在末尾。
+enum BrowseLayout {
+  masonry, // 瀑布流（按图片原始比例）
+  square, // 正方形
+  landscape4x3, // 横屏 4:3
+  landscape16x9, // 横屏 16:9
+  portrait3x4, // 竖屏 3:4
+  portrait9x16, // 竖屏 9:16
+}
+
+extension BrowseLayoutAspect on BrowseLayout {
+  /// 固定画幅的宽高比；瀑布流返回 null，表示沿用图片自身比例
+  double? get aspectRatio => switch (this) {
+    BrowseLayout.masonry => null,
+    BrowseLayout.square => 1.0,
+    BrowseLayout.landscape4x3 => 4 / 3,
+    BrowseLayout.landscape16x9 => 16 / 9,
+    BrowseLayout.portrait3x4 => 3 / 4,
+    BrowseLayout.portrait9x16 => 9 / 16,
+  };
+}
+
 class SettingsProvider extends ChangeNotifier {
   // 播放基础设置
   // 换片时间的滑块档位值（毫秒），自定义开关关闭时生效
@@ -65,6 +106,14 @@ class SettingsProvider extends ChangeNotifier {
 
   // 文件与目录相关
   bool _recursiveScan = true;
+  FileListInfo _fileListInfo = FileListInfo.none;
+  BrowseLayout _browseLayout = BrowseLayout.masonry;
+
+  /// 本地文件夹的浏览格式（路径 → 格式 id），未记录时跟随设置页默认值
+  Map<String, String> _localBrowseLayouts = {};
+
+  /// 共享文件夹的浏览格式（共享文件夹 key → 格式 id）
+  Map<String, String> _sharedBrowseLayouts = {};
 
   // 桌面端窗口行为：关闭按钮是否收起到系统托盘
   bool _closeToTray = false;
@@ -77,6 +126,12 @@ class SettingsProvider extends ChangeNotifier {
 
   // 快捷键与控制
   bool _wheelSwitchImage = true;
+
+  /// 手机端短按卡片的行为（默认选中）
+  MobileTapAction _mobileTapAction = MobileTapAction.select;
+
+  /// Windows 端是否在支持的图片格式上注册「用 FrameFlow 打开」右键菜单
+  bool _addToContextMenu = false;
 
   // 删除行为设置
   DeleteAction _deleteAction = DeleteAction.exclude;
@@ -136,6 +191,14 @@ class SettingsProvider extends ChangeNotifier {
   /// 读取某个共享文件夹上次使用的排序方式；未记录时返回 null（默认顺序）
   String? sharedSortFor(String folderKey) => _sharedSortModes[folderKey];
 
+  /// 读取某个本地文件夹上次使用的浏览格式；未记录时返回 null（跟随设置页）
+  String? localBrowseLayoutFor(String folderPath) =>
+      _localBrowseLayouts[folderPath];
+
+  /// 读取某个共享文件夹上次使用的浏览格式；未记录时返回 null（跟随设置页）
+  String? sharedBrowseLayoutFor(String folderKey) =>
+      _sharedBrowseLayouts[folderKey];
+
   /// 上次复制文件的目标目录
   String? get lastCopyDestination => _lastCopyDestination;
   PlayOrder get playOrder => _playOrder;
@@ -151,6 +214,8 @@ class SettingsProvider extends ChangeNotifier {
   int get controlsHideDelay => _controlsHideDelay;
   bool get keepControlsOnPause => _keepControlsOnPause;
   bool get recursiveScan => _recursiveScan;
+  FileListInfo get fileListInfo => _fileListInfo;
+  BrowseLayout get browseLayout => _browseLayout;
   bool get closeToTray => _closeToTray;
 
   String? get lastFolderPath => _lastFolderPath;
@@ -158,6 +223,12 @@ class SettingsProvider extends ChangeNotifier {
 
   bool get showImageInfo => _showImageInfo;
   bool get wheelSwitchImage => _wheelSwitchImage;
+
+  /// 手机端短按卡片的行为
+  MobileTapAction get mobileTapAction => _mobileTapAction;
+
+  /// 是否已启用「用 FrameFlow 打开」右键菜单
+  bool get addToContextMenu => _addToContextMenu;
   DeleteAction get deleteAction => _deleteAction;
   int get languageIndex => _languageIndex;
 
@@ -281,6 +352,21 @@ class SettingsProvider extends ChangeNotifier {
     _saveSettings();
   }
 
+  /// 设置瀑布流卡片下方展示的文件信息（单选）。
+  void setFileListInfo(FileListInfo value) {
+    _fileListInfo = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  /// 设置默认的浏览格式（单个文件夹未单独设置时使用）
+  void setBrowseLayout(BrowseLayout value) {
+    if (_browseLayout == value) return;
+    _browseLayout = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
   void setCloseToTray(bool value) {
     _closeToTray = value;
     notifyListeners();
@@ -307,6 +393,22 @@ class SettingsProvider extends ChangeNotifier {
 
   void setWheelSwitchImage(bool value) {
     _wheelSwitchImage = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  /// 设置手机端短按卡片的行为
+  void setMobileTapAction(MobileTapAction value) {
+    if (_mobileTapAction == value) return;
+    _mobileTapAction = value;
+    notifyListeners();
+    _saveSettings();
+  }
+
+  /// 记录右键菜单集成是否已启用（实际注册由设置页调用系统服务完成）
+  void setAddToContextMenu(bool value) {
+    if (_addToContextMenu == value) return;
+    _addToContextMenu = value;
     notifyListeners();
     _saveSettings();
   }
@@ -460,6 +562,29 @@ class SettingsProvider extends ChangeNotifier {
     _saveSettings();
   }
 
+  /// 记住某个本地文件夹的浏览格式
+  void setLocalBrowseLayout(String folderPath, BrowseLayout layout) {
+    if (_localBrowseLayouts[folderPath] == layout.name) return;
+    _localBrowseLayouts[folderPath] = layout.name;
+    _saveSettings();
+  }
+
+  /// 记住某个共享文件夹的浏览格式
+  void setSharedBrowseLayout(String folderKey, BrowseLayout layout) {
+    if (_sharedBrowseLayouts[folderKey] == layout.name) return;
+    _sharedBrowseLayouts[folderKey] = layout.name;
+    _saveSettings();
+  }
+
+  /// 把持久化的浏览格式 id 还原为枚举；未知 id 返回 null
+  static BrowseLayout? parseBrowseLayout(String? id) {
+    if (id == null) return null;
+    for (final layout in BrowseLayout.values) {
+      if (layout.name == id) return layout;
+    }
+    return null;
+  }
+
   /// 记住上次复制文件的目标目录
   void setLastCopyDestination(String destination) {
     if (_lastCopyDestination == destination) return;
@@ -515,6 +640,16 @@ class SettingsProvider extends ChangeNotifier {
     _controlsHideDelay = prefs.getInt('controlsHideDelay') ?? 3;
     _keepControlsOnPause = prefs.getBool('keepControlsOnPause') ?? false;
     _recursiveScan = prefs.getBool('recursiveScan') ?? true;
+    final fileListInfoIndex = (prefs.getInt('fileListInfoMode') ?? 0).clamp(
+      0,
+      FileListInfo.values.length - 1,
+    );
+    _fileListInfo = FileListInfo.values[fileListInfoIndex];
+    final browseLayoutIndex = (prefs.getInt('browseLayout') ?? 0).clamp(
+      0,
+      BrowseLayout.values.length - 1,
+    );
+    _browseLayout = BrowseLayout.values[browseLayoutIndex];
     _closeToTray = prefs.getBool('closeToTray') ?? false;
 
     _lastFolderPath = prefs.getString('lastFolderPath');
@@ -532,9 +667,22 @@ class SettingsProvider extends ChangeNotifier {
 
     _localSortModes = _decodeStringMap(prefs.getString('localSortModes'));
     _sharedSortModes = _decodeStringMap(prefs.getString('sharedSortModes'));
+    _localBrowseLayouts = _decodeStringMap(
+      prefs.getString('localBrowseLayouts'),
+    );
+    _sharedBrowseLayouts = _decodeStringMap(
+      prefs.getString('sharedBrowseLayouts'),
+    );
     _lastCopyDestination = prefs.getString('lastCopyDestination');
 
     _wheelSwitchImage = prefs.getBool('wheelSwitchImage') ?? true;
+    final mobileTapIndex =
+        (prefs.getInt('mobileTapAction') ?? MobileTapAction.select.index).clamp(
+          0,
+          MobileTapAction.values.length - 1,
+        );
+    _mobileTapAction = MobileTapAction.values[mobileTapIndex];
+    _addToContextMenu = prefs.getBool('addToContextMenu') ?? false;
     _deleteAction = DeleteAction.values[prefs.getInt('deleteAction') ?? 0];
     _imageOrientation =
         ImageOrientation.values[prefs.getInt('imageOrientation') ?? 2];
@@ -651,6 +799,8 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.setInt('controlsHideDelay', _controlsHideDelay);
     await prefs.setBool('keepControlsOnPause', _keepControlsOnPause);
     await prefs.setBool('recursiveScan', _recursiveScan);
+    await prefs.setInt('fileListInfoMode', _fileListInfo.index);
+    await prefs.setInt('browseLayout', _browseLayout.index);
     await prefs.setBool('closeToTray', _closeToTray);
 
     await prefs.setString('lastFolderPath', _lastFolderPath ?? '');
@@ -661,9 +811,19 @@ class SettingsProvider extends ChangeNotifier {
     await prefs.setInt('customInterval', _customInterval);
     await prefs.setBool('useCustomInterval', _useCustomInterval);
     await prefs.setBool('wheelSwitchImage', _wheelSwitchImage);
+    await prefs.setInt('mobileTapAction', _mobileTapAction.index);
+    await prefs.setBool('addToContextMenu', _addToContextMenu);
     await prefs.setString('excludedPaths', json.encode(_excludedPaths));
     await prefs.setString('localSortModes', json.encode(_localSortModes));
     await prefs.setString('sharedSortModes', json.encode(_sharedSortModes));
+    await prefs.setString(
+      'localBrowseLayouts',
+      json.encode(_localBrowseLayouts),
+    );
+    await prefs.setString(
+      'sharedBrowseLayouts',
+      json.encode(_sharedBrowseLayouts),
+    );
     if (_lastCopyDestination != null) {
       await prefs.setString('lastCopyDestination', _lastCopyDestination!);
     } else {

@@ -10,10 +10,14 @@ import 'package:frame_flow/screens/help_screen.dart';
 import 'package:frame_flow/screens/lan_devices_screen.dart';
 import 'package:frame_flow/screens/player_screen.dart';
 import 'package:frame_flow/services/image_scan_service.dart';
+import 'package:frame_flow/utils/filename_compare.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  /// 由右键菜单/命令行传入、启动后直接播放的图片路径
+  final String? initialImagePath;
+
+  const HomeScreen({super.key, this.initialImagePath});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -28,7 +32,24 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _autoPlayOnStartup();
+    if (widget.initialImagePath != null) {
+      // 从右键菜单打开：跳过自动扫描，直接播放该图片
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openInitialImage());
+    } else {
+      _autoPlayOnStartup();
+    }
+  }
+
+  /// 直接播放命令行传入的图片（只播放该文件，不扫描其所在目录）。
+  void _openInitialImage() {
+    final path = widget.initialImagePath;
+    if (!mounted || path == null) return;
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    slideProvider.setImages([
+      ImageItem(name: path.split(Platform.pathSeparator).last, path: path),
+    ]);
+    slideProvider.startPlay();
+    Navigator.pushNamed(context, '/player');
   }
 
   Future<void> _autoPlayOnStartup() async {
@@ -66,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
             final now = DateTime.now();
             if (now.difference(lastUpdateTime) >= updateInterval) {
               final newImages = uniqueImages.values.toList()
-                ..sort((a, b) => a.name.compareTo(b.name));
+                ..sort((a, b) => compareFileNames(a.name, b.name));
               if (hasStartedPlaying) {
                 slideProvider.addNewImages(
                   newImages,
@@ -100,7 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // 所有文件夹扫描完毕
       final allImages = uniqueImages.values.toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
+        ..sort((a, b) => compareFileNames(a.name, b.name));
 
       if (allImages.isEmpty) {
         setState(() {
@@ -149,7 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
   ) async {
     // 对已收集的图片进行排序
     final sortedImages = images.toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+      ..sort((a, b) => compareFileNames(a.name, b.name));
 
     slideProvider.setImages(
       sortedImages,
@@ -232,7 +253,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // 按文件名排序
       final sortedImages = uniqueImages.values.toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
+        ..sort((a, b) => compareFileNames(a.name, b.name));
 
       if (sortedImages.isEmpty) {
         if (!mounted) return;
@@ -320,7 +341,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: const Color(0xFF00b894),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
+                        horizontal: 20,
                         vertical: 16,
                       ),
                       shape: RoundedRectangleBorder(
@@ -336,9 +357,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         const Icon(Icons.play_circle, size: 24),
                         const SizedBox(width: 12),
-                        Text(
-                          AppLocalizations.of(context).startPlay,
-                          style: const TextStyle(fontSize: 18),
+                        Flexible(
+                          child: Text(
+                            AppLocalizations.of(context).startPlay,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 18),
+                          ),
                         ),
                       ],
                     ),
@@ -354,7 +379,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             backgroundColor: const Color(0xFF0984e3),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 32,
+                              horizontal: 20,
                               vertical: 16,
                             ),
                             shape: RoundedRectangleBorder(
@@ -370,9 +395,13 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               const Icon(Icons.photo_library, size: 24),
                               const SizedBox(width: 12),
-                              Text(
-                                AppLocalizations.of(context).selectAlbum,
-                                style: const TextStyle(fontSize: 18),
+                              Flexible(
+                                child: Text(
+                                  AppLocalizations.of(context).selectAlbum,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 18),
+                                ),
                               ),
                             ],
                           ),
@@ -383,7 +412,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             backgroundColor: const Color(0xFF0984e3),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 32,
+                              horizontal: 20,
                               vertical: 16,
                             ),
                             shape: RoundedRectangleBorder(
@@ -399,9 +428,13 @@ class _HomeScreenState extends State<HomeScreen> {
                             children: [
                               const Icon(Icons.folder_open, size: 24),
                               const SizedBox(width: 12),
-                              Text(
-                                AppLocalizations.of(context).selectFolder,
-                                style: const TextStyle(fontSize: 18),
+                              Flexible(
+                                child: Text(
+                                  AppLocalizations.of(context).selectFolder,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 18),
+                                ),
                               ),
                             ],
                           ),
@@ -438,7 +471,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: const Color(0xFF00cec9),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
+                        horizontal: 20,
                         vertical: 16,
                       ),
                       shape: RoundedRectangleBorder(
@@ -454,9 +487,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         const Icon(Icons.devices, size: 24),
                         const SizedBox(width: 12),
-                        Text(
-                          AppLocalizations.of(context).lanSharePageTitle,
-                          style: const TextStyle(fontSize: 18),
+                        Flexible(
+                          child: Text(
+                            AppLocalizations.of(context).lanSharePageTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 18),
+                          ),
                         ),
                       ],
                     ),
@@ -471,7 +508,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: const Color(0xFF6c5ce7),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
+                        horizontal: 20,
                         vertical: 16,
                       ),
                       shape: RoundedRectangleBorder(
@@ -487,9 +524,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         const Icon(Icons.settings, size: 24),
                         const SizedBox(width: 12),
-                        Text(
-                          AppLocalizations.of(context).settings,
-                          style: const TextStyle(fontSize: 18),
+                        Flexible(
+                          child: Text(
+                            AppLocalizations.of(context).settings,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 18),
+                          ),
                         ),
                       ],
                     ),
@@ -504,7 +545,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: const Color(0xFFe17055),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
+                        horizontal: 20,
                         vertical: 16,
                       ),
                       shape: RoundedRectangleBorder(
@@ -520,9 +561,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         const Icon(Icons.help_outline, size: 24),
                         const SizedBox(width: 12),
-                        Text(
-                          AppLocalizations.of(context).help,
-                          style: const TextStyle(fontSize: 18),
+                        Flexible(
+                          child: Text(
+                            AppLocalizations.of(context).help,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 18),
+                          ),
                         ),
                       ],
                     ),

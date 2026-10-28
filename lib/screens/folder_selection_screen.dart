@@ -16,6 +16,7 @@ import 'package:frame_flow/screens/remote_browser_screen.dart';
 import 'package:frame_flow/services/directory_picker_service.dart';
 import 'package:frame_flow/services/image_scan_service.dart';
 import 'package:frame_flow/services/media_store_service.dart';
+import 'package:frame_flow/utils/filename_compare.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 class FolderSelectionScreen extends StatefulWidget {
@@ -328,7 +329,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   ///
   /// 文件可能在应用外被移走或删除，缓存与设置里的路径都会过期，
   /// 因此每次进入本页（含从子页面返回）都要重新计算一遍。
-  void _refreshStats() {
+  Future<void> _refreshStats() async {
+    if (!mounted) return;
+    // 先剔除磁盘上已不存在的文件夹（相册在应用外被删除）
+    await _pruneMissingFolders();
     if (!mounted) return;
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
     setState(() {
@@ -337,6 +341,44 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     for (final path in slideProvider.folderPaths) {
       _countFolderImages(path);
     }
+  }
+
+  /// 移除磁盘上已经不存在的文件夹。
+  ///
+  /// 与「存在但图片数量为 0」区分开：只要目录仍在就保留，由用户自行决定是否移除；
+  /// 目录已被删除（例如在系统文件管理器里删掉相册）时直接从列表与设置中移除。
+  Future<void> _pruneMissingFolders() async {
+    if (!mounted) return;
+    final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    final settingsProvider = Provider.of<SettingsProvider>(
+      context,
+      listen: false,
+    );
+    if (slideProvider.folderPaths.isEmpty) return;
+
+    final missing = <String>[];
+    for (final path in List<String>.of(slideProvider.folderPaths)) {
+      bool exists;
+      try {
+        exists = await Directory(path).exists();
+      } catch (_) {
+        // 无法判断时（如权限受限）保留，避免误删用户的文件夹
+        exists = true;
+      }
+      if (!exists) missing.add(path);
+    }
+    if (missing.isEmpty || !mounted) return;
+
+    for (final path in missing) {
+      slideProvider.removeFolderPath(path);
+      settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
+    }
+    setState(() {
+      for (final path in missing) {
+        _folderStats.remove(path);
+        _scanningFolders.remove(path);
+      }
+    });
   }
 
   /// 提取路径的最后一级目录名（兼容 / 和 \ 分隔符）
@@ -842,7 +884,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
         actions: [
           _actionButton(
             tooltip: loc.restoreAll,
-            icon: const Icon(Icons.restore, color: Colors.orange),
+            icon: const Icon(Icons.undo, color: Colors.greenAccent),
             onPressed: () => _restoreExcludedGroup(allPaths),
           ),
         ],
@@ -883,7 +925,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       actions: [
         _actionButton(
           tooltip: loc.restoreFiles,
-          icon: const Icon(Icons.restore, color: Colors.orange),
+          icon: const Icon(Icons.undo, color: Colors.greenAccent),
           onPressed: () => _restoreExcludedGroup(paths),
         ),
         _actionButton(
@@ -973,7 +1015,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
           if (hasStartedPlaying &&
               uniqueImages.length - lastUpdateCount >= 10) {
             final newImages = uniqueImages.values.toList()
-              ..sort((a, b) => a.name.compareTo(b.name));
+              ..sort((a, b) => compareFileNames(a.name, b.name));
             slideProvider.setImages(newImages);
             lastUpdateCount = uniqueImages.length;
           }
@@ -1016,7 +1058,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
 
       // 按文件名排序
       final sortedImages = uniqueImages.values.toList()
-        ..sort((a, b) => a.name.compareTo(b.name));
+        ..sort((a, b) => compareFileNames(a.name, b.name));
 
       if (sortedImages.isEmpty) {
         if (!mounted) return;
@@ -1072,7 +1114,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   ) async {
     // 对已收集的图片进行排序
     final sortedImages = images.toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+      ..sort((a, b) => compareFileNames(a.name, b.name));
 
     slideProvider.setImages(sortedImages);
     settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
