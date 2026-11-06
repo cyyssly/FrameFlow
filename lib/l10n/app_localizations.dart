@@ -90,6 +90,45 @@ class AppLocalizations {
   String get confirm => _t('确定', 'OK', '確定');
   String get cancel => _t('取消', 'Cancel', '取消');
 
+  // 多媒体库
+  String get mediaLibraries => _t('媒体库', 'Libraries', '媒體庫');
+  String get activeLibraryHint =>
+      _t('点击切换或管理媒体库', 'Tap to switch or manage libraries', '點擊切換或管理媒體庫');
+  String get newLibrary => _t('新建库', 'New Library', '新建庫');
+  String get renameLibrary => _t('重命名', 'Rename', '重新命名');
+  String get deleteLibrary => _t('删除库', 'Delete Library', '刪除庫');
+  String get libraryNameHint =>
+      _t('例如：风景、家庭、壁纸', 'e.g. Scenery, Family, Wallpapers', '例如：風景、家庭、壁紙');
+  String libraryItemCount(int local, int shared) => _t(
+    '$local 个文件夹 · $shared 个共享',
+    '$local folders · $shared shared',
+    '$local 個資料夾 · $shared 個共享',
+  );
+  String get confirmDeleteLibrary => _t(
+    '删除库不会删除文件，确定删除？',
+    'Deleting a library keeps your files. Delete it?',
+    '刪除庫不會刪除檔案，確定刪除？',
+  );
+  String get noLibrariesHint => _t(
+    '还没有媒体库，点击下方按钮新建一个',
+    'No libraries yet. Create one below.',
+    '還沒有媒體庫，點擊下方按鈕新建一個',
+  );
+  String get hideLibrary => _t('隐藏', 'Hide', '隱藏');
+  String get unhideLibrary => _t('取消隐藏', 'Unhide', '取消隱藏');
+  String get showHiddenLibraries =>
+      _t('显示隐藏媒体库', 'Show Hidden Libraries', '顯示隱藏媒體庫');
+  String get showHiddenLibrariesDesc => _t(
+    '开启后，已隐藏的媒体库会以半透明样式出现在库列表中',
+    'When on, hidden libraries appear in the list with reduced opacity',
+    '開啟後，已隱藏的媒體庫會以半透明樣式出現在庫列表中',
+  );
+  String get hiddenLibrariesCollapsed => _t(
+    '隐藏的媒体库已折叠，可在设置中开启「显示隐藏媒体库」',
+    'Hidden libraries are collapsed. Enable "Show Hidden Libraries" in Settings.',
+    '隱藏的媒體庫已折疊，可在設定中開啟「顯示隱藏媒體庫」',
+  );
+
   // 播放页
   String get noImages => _t('没有图片', 'No Images', '沒有圖片');
   String get imageLoadFailed => _t('图片加载失败', 'Load Failed', '圖片加載失敗');
@@ -331,11 +370,15 @@ class AppLocalizations {
   String includesImages(int c) =>
       _t('包含 $c 张图片', 'Includes $c images', '包含 $c 張圖片');
   String filesCount(int c) => _t('包含$c个文件', '$c files', '包含$c個文件');
-  String folderContentCount(int subfolders, int files) => _t(
-    '包含$subfolders个子文件夹，共$files个文件',
-    '$subfolders subfolders, $files files',
-    '包含$subfolders個子文件夾，共$files個文件',
-  );
+  String folderContentCount(int subfolders, int files) {
+    // 没有子文件夹时省略“0 个子文件夹”，只报告文件数量
+    if (subfolders <= 0) return filesCount(files);
+    return _t(
+      '包含$subfolders个子文件夹，共$files个文件',
+      '$subfolders subfolders, $files files',
+      '包含$subfolders個子文件夾，共$files個文件',
+    );
+  }
 
   // 消息
   String msgScanComplete(int c) =>
@@ -527,6 +570,13 @@ class AppLocalizations {
   String get helpVersionLabel => _t('版本', 'Version', '版本');
   String get helpGitHub =>
       _t('GitHub 项目主页', 'GitHub Repository', 'GitHub 專案主頁');
+  String get helpSisterAppTitle =>
+      _t('姐妹应用：SteamFlow', 'Sister App: SteamFlow', '姊妹應用：SteamFlow');
+  String get helpSisterAppDesc => _t(
+    'SteamFlow 是同一作者开发的跨平台视频幻灯片应用。图片用 FrameFlow，视频用 SteamFlow。',
+    'SteamFlow is a cross-platform video slideshow app by the same author. Photos with FrameFlow, videos with SteamFlow.',
+    'SteamFlow 是同一作者開發的跨平台視頻幻燈片應用。圖片用 FrameFlow，視頻用 SteamFlow。',
+  );
   String get helpSponsorDesc => _t(
     '本应用完全免费、无广告，如果它帮到了你，欢迎赞助支持。',
     'This app is completely free and ad-free. If it helps you, a donation is welcome.',

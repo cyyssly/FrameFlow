@@ -35,7 +35,20 @@ enum _SortAction {
 class FolderImagesScreen extends StatefulWidget {
   final String folderPath;
 
-  const FolderImagesScreen({super.key, required this.folderPath});
+  /// 同名文件夹的其余路径。
+  ///
+  /// 移动端会把所有同名的本地文件夹归并为一个条目管理，浏览时需要把
+  /// 这些路径的图片合并在一起展示；桌面端恒为空。
+  final List<String> extraFolderPaths;
+
+  const FolderImagesScreen({
+    super.key,
+    required this.folderPath,
+    this.extraFolderPaths = const [],
+  });
+
+  /// 本次浏览覆盖的全部文件夹路径（首个为主路径，用于排序/布局记忆）
+  List<String> get allFolderPaths => [folderPath, ...extraFolderPaths];
 
   @override
   State<FolderImagesScreen> createState() => _FolderImagesScreenState();
@@ -175,10 +188,16 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
 
   Future<void> _loadImages() async {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    final items = await ImageScanService.scanFolder(
-      widget.folderPath,
-      settings,
-    );
+    // 移动端同名文件夹会归并展示：逐个扫描后按图片键去重，
+    // 避免同一图片因路径重复出现在列表中
+    final unique = <String, ImageItem>{};
+    for (final path in widget.allFolderPaths) {
+      final items = await ImageScanService.scanFolder(path, settings);
+      for (final item in items) {
+        unique.putIfAbsent(item.key, () => item);
+      }
+    }
+    final items = unique.values.toList();
     if (!mounted) return;
     setState(() {
       _allItems = items;
@@ -219,8 +238,10 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
       await _precacheBatch(batch);
       // 期间发生过重新排序：本批属于旧顺序，直接作废
       if (generation != _batchGeneration) return;
-      // 宽高比与像素都已就绪，才允许 _loadMore 把这一批显示出来
-      _loadedCount = end;
+      // 宽高比与像素都已就绪，才允许 _loadMore 把这一批显示出来。
+      // 预加载期间可能排除了图片，end 是旧列表长度下的下标，需要按当前
+      // 列表重新收敛，避免超过 _allItems.length 后让分页无法结束。
+      _loadedCount = end.clamp(_items.length, _allItems.length);
     } finally {
       _isPreloading = false;
     }
@@ -462,13 +483,23 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
   }
 
   // ── 单图操作 ──
+  /// 从浏览列表移除图片，并同步预加载计数。
+  ///
+  /// _items 始终是 _allItems 的前缀；若移除的是已预加载范围内的图片，
+  /// _loadedCount 也必须减少，否则末尾会出现 sublist 越界或加载提示不消失。
+  void _removeFromLists(String path) {
+    final index = _allItems.indexWhere((item) => item.path == path);
+    if (index < 0) return;
+    _allItems.removeAt(index);
+    _items.removeWhere((item) => item.path == path);
+    if (index < _loadedCount) _loadedCount--;
+    _loadedCount = _loadedCount.clamp(_items.length, _allItems.length);
+  }
+
   void _excludeImage(String path) {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     settings.addExcludedPath(path);
-    setState(() {
-      _items.removeWhere((item) => item.path == path);
-      _allItems.removeWhere((item) => item.path == path);
-    });
+    setState(() => _removeFromLists(path));
     _showSnack(AppLocalizations.of(context).excluded);
   }
 
@@ -489,10 +520,7 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
       _showSnack(AppLocalizations.of(context).deleteFailed);
       return;
     }
-    setState(() {
-      _items.removeWhere((i) => i.path == item.path);
-      _allItems.removeWhere((i) => i.path == item.path);
-    });
+    setState(() => _removeFromLists(item.path));
     _showSnack(AppLocalizations.of(context).deletedToTrash);
   }
 

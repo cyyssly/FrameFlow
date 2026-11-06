@@ -5,6 +5,8 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:frame_flow/l10n/app_localizations.dart';
+import 'package:frame_flow/models/image_library.dart';
 import 'package:frame_flow/models/lan_models.dart';
 
 /// 播放顺序
@@ -121,6 +123,15 @@ class SettingsProvider extends ChangeNotifier {
   String? _lastFolderPath;
   List<String> _lastFolderPaths = [];
 
+  /// 所有图片库（互不关联的文件夹集合）
+  List<ImageLibrary> _libraries = [];
+
+  /// 当前激活的库 id
+  String _activeLibraryId = '';
+
+  /// 库列表是否显示已隐藏的库（开启时半透明展示，关闭时完全隐藏）
+  bool _showHiddenLibraries = false;
+
   // 信息显示设置（自动隐藏由工具栏的自动隐藏设置统一控制）
   bool _showImageInfo = false;
 
@@ -183,7 +194,24 @@ class SettingsProvider extends ChangeNotifier {
   int get presetInterval => _interval;
   int get customInterval => _customInterval;
   bool get useCustomInterval => _useCustomInterval;
-  List<String> get excludedPaths => List.unmodifiable(_excludedPaths);
+
+  /// 当前激活库排除播放的图片路径；无库时回退到全局列表（迁移期兼容）
+  List<String> get excludedPaths {
+    final lib = activeLibrary;
+    return List.unmodifiable(lib?.excludedPaths ?? _excludedPaths);
+  }
+
+  /// 所有库排除路径的并集。
+  ///
+  /// 局域网共享时对外提供本机文件夹，被排除的图片可能与当前激活库无关，
+  /// 因此服务端要用并集，避免在其他库里排除的图片又出现在共享列表里。
+  List<String> get allExcludedPaths {
+    final union = <String>{..._excludedPaths};
+    for (final lib in _libraries) {
+      union.addAll(lib.excludedPaths);
+    }
+    return List.unmodifiable(union.toList());
+  }
 
   /// 读取某个本地文件夹上次使用的排序方式；未记录时返回 null（默认顺序）
   String? localSortFor(String folderPath) => _localSortModes[folderPath];
@@ -219,7 +247,30 @@ class SettingsProvider extends ChangeNotifier {
   bool get closeToTray => _closeToTray;
 
   String? get lastFolderPath => _lastFolderPath;
-  List<String> get lastFolderPaths => _lastFolderPaths;
+
+  /// 当前激活库的文件夹列表；无库时回退到 [_lastFolderPaths]（迁移期兼容）。
+  ///
+  /// 现有所有代码都通过它读取「当前管理的文件夹」，因此引入多库后无需改动。
+  List<String> get lastFolderPaths {
+    final lib = activeLibrary;
+    return lib != null ? lib.folderPaths : _lastFolderPaths;
+  }
+
+  /// 全部库（只读视图）
+  List<ImageLibrary> get libraries => List.unmodifiable(_libraries);
+
+  String get activeLibraryId => _activeLibraryId;
+
+  /// 库列表是否显示已隐藏的库
+  bool get showHiddenLibraries => _showHiddenLibraries;
+
+  /// 当前激活的库；无库时返回 null
+  ImageLibrary? get activeLibrary {
+    for (final lib in _libraries) {
+      if (lib.id == _activeLibraryId) return lib;
+    }
+    return _libraries.isNotEmpty ? _libraries.first : null;
+  }
 
   bool get showImageInfo => _showImageInfo;
   bool get wheelSwitchImage => _wheelSwitchImage;
@@ -248,6 +299,26 @@ class SettingsProvider extends ChangeNotifier {
 
   /// 已添加的共享文件夹（其他设备上的目录）
   List<SharedFolderRef> get sharedFolders => List.unmodifiable(_sharedFolders);
+
+  /// 当前激活库绑定的共享文件夹（按全局登记顺序）
+  ///
+  /// 无库时返回全部（迁移期兼容）。
+  List<SharedFolderRef> get activeLibrarySharedFolders {
+    final lib = activeLibrary;
+    if (lib == null) return List.unmodifiable(_sharedFolders);
+    final keys = lib.sharedFolderKeys.toSet();
+    return List.unmodifiable([
+      for (final ref in _sharedFolders)
+        if (keys.contains(ref.key)) ref,
+    ]);
+  }
+
+  /// 某个共享源是否已绑定到当前激活库
+  bool isSharedFolderInActiveLibrary(String key) {
+    final lib = activeLibrary;
+    if (lib == null) return _sharedFolders.any((ref) => ref.key == key);
+    return lib.sharedFolderKeys.contains(key);
+  }
 
   /// 本机设备标识（持久化，用于发现列表中排除自己）
   String get deviceId => _deviceId;
@@ -380,7 +451,10 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   void setLastFolderPaths(List<String> value) {
-    _lastFolderPaths = value;
+    final copy = List<String>.of(value);
+    _lastFolderPaths = copy;
+    // 还没有库时自动建立默认库，保证新添加的文件夹有库可归属
+    _ensureActiveLibrary().folderPaths = copy;
     notifyListeners();
     _saveSettings();
   }
@@ -469,19 +543,230 @@ class SettingsProvider extends ChangeNotifier {
     _saveSettings();
   }
 
+  /// 添加共享文件夹，并绑定到当前激活的库。
+  ///
+  /// 同一个共享源可以被多个库分别绑定：再次添加时只更新全局登记信息，
+  /// 并确保当前库已包含该绑定。
   void addSharedFolder(SharedFolderRef ref) {
     _sharedFolders.removeWhere((item) => item.key == ref.key);
     _sharedFolders.add(ref);
+    // 还没有库时自动建立默认库，保证共享源有库可绑定
+    final lib = _ensureActiveLibrary();
+    if (!lib.sharedFolderKeys.contains(ref.key)) {
+      lib.sharedFolderKeys.add(ref.key);
+    }
     notifyListeners();
     _saveSettings();
   }
 
-  void removeSharedFolder(String key) {
-    final before = _sharedFolders.length;
-    _sharedFolders.removeWhere((item) => item.key == key);
-    if (_sharedFolders.length == before) return;
+  /// 把共享文件夹从当前激活库解绑。
+  ///
+  /// 若已没有任何库绑定该共享源，则连同全局登记一起清除。
+  void removeSharedFolderFromActiveLibrary(String key) {
+    final lib = activeLibrary;
+    if (lib == null) return;
+    final before = lib.sharedFolderKeys.length;
+    lib.sharedFolderKeys.removeWhere((item) => item == key);
+    if (lib.sharedFolderKeys.length == before) return;
+    _pruneUnusedSharedFolders();
     notifyListeners();
     _saveSettings();
+  }
+
+  /// 清除没有被任何库引用的共享源登记，避免继续探测与缓存无用源
+  void _pruneUnusedSharedFolders() {
+    final used = <String>{
+      for (final lib in _libraries) ...lib.sharedFolderKeys,
+    };
+    _sharedFolders.removeWhere((ref) => !used.contains(ref.key));
+  }
+
+  // ── 多媒体库 ──
+
+  /// 返回当前激活库；一个库都没有时自动创建「默认媒体库」。
+  ///
+  /// 新用户可能先加文件夹/共享源再建库，这里保证数据总有归属。
+  ImageLibrary _ensureActiveLibrary() {
+    final existing = activeLibrary;
+    if (existing != null) return existing;
+    final lib = ImageLibrary(
+      id: 'lib_default',
+      name: _defaultLibraryName(),
+      folderPaths: [],
+    );
+    _libraries.add(lib);
+    _activeLibraryId = lib.id;
+    return lib;
+  }
+
+  /// 设置库列表是否显示隐藏库（关闭时列表中完全不出现）。
+  ///
+  /// 关闭开关时，若当前激活库是隐藏库，会自动切换到第一个未隐藏的库并返回
+  /// true，调用方需要同步 [SlideProvider] 的文件夹。没有未隐藏库时保持原状
+  /// 并返回 false（此时库列表里一个库也不显示）。
+  bool setShowHiddenLibraries(bool value) {
+    if (_showHiddenLibraries == value) return false;
+    _showHiddenLibraries = value;
+
+    var activeChanged = false;
+    if (!value) {
+      final active = activeLibrary;
+      if (active != null && active.hidden) {
+        for (final lib in _libraries) {
+          if (!lib.hidden) {
+            _activeLibraryId = lib.id;
+            _lastFolderPaths = lib.folderPaths;
+            activeChanged = true;
+            break;
+          }
+        }
+      }
+    }
+
+    notifyListeners();
+    _saveSettings();
+    return activeChanged;
+  }
+
+  /// 新建一个空库并切换到它（名称自动去重，避免两个同名库难以区分）
+  void addLibrary(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+
+    var unique = trimmed;
+    var suffix = 2;
+    while (_libraries.any((lib) => lib.name == unique)) {
+      unique = '$trimmed $suffix';
+      suffix++;
+    }
+
+    final lib = ImageLibrary(
+      id: 'lib_${DateTime.now().microsecondsSinceEpoch}',
+      name: unique,
+      folderPaths: [],
+    );
+    _libraries.add(lib);
+    _activeLibraryId = lib.id;
+    _lastFolderPaths = [];
+    notifyListeners();
+    _saveSettings();
+  }
+
+  void renameLibrary(String id, String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    for (final lib in _libraries) {
+      if (lib.id != id) continue;
+      if (lib.name == trimmed) return;
+      lib.name = trimmed;
+      notifyListeners();
+      _saveSettings();
+      return;
+    }
+  }
+
+  /// 删除指定库。不删除文件；只剩一个库时拒绝删除。
+  void removeLibrary(String id) {
+    if (_libraries.length <= 1) return;
+    final before = _libraries.length;
+    _libraries.removeWhere((lib) => lib.id == id);
+    if (_libraries.length == before) return;
+    if (_activeLibraryId == id) {
+      _activeLibraryId = _libraries.first.id;
+    }
+    _lastFolderPaths = activeLibrary?.folderPaths ?? [];
+    _pruneUnusedSharedFolders();
+    notifyListeners();
+    _saveSettings();
+  }
+
+  /// 切换激活库。调用方需要自行更新 [SlideProvider] 的文件夹并重扫。
+  void switchLibrary(String id) {
+    if (_activeLibraryId == id) return;
+    if (!_libraries.any((lib) => lib.id == id)) return;
+    _activeLibraryId = id;
+    _lastFolderPaths = activeLibrary?.folderPaths ?? [];
+    notifyListeners();
+    _saveSettings();
+  }
+
+  /// 设置某个库是否隐藏。
+  ///
+  /// 若隐藏的正是当前激活库且还有其他未隐藏的库，会自动切换到第一个未隐藏
+  /// 的库，避免当前库从列表中消失后无处可寻。此时返回 true，调用方需要同步
+  /// [SlideProvider] 的文件夹；全部库都被隐藏时保持当前库不变并返回 false。
+  bool setLibraryHidden(String id, bool hidden) {
+    ImageLibrary? target;
+    for (final lib in _libraries) {
+      if (lib.id == id) {
+        target = lib;
+        break;
+      }
+    }
+    if (target == null || target.hidden == hidden) return false;
+
+    target.hidden = hidden;
+    var activeChanged = false;
+    if (hidden && _activeLibraryId == id) {
+      for (final lib in _libraries) {
+        if (!lib.hidden) {
+          _activeLibraryId = lib.id;
+          _lastFolderPaths = lib.folderPaths;
+          activeChanged = true;
+          break;
+        }
+      }
+    }
+    notifyListeners();
+    _saveSettings();
+    return activeChanged;
+  }
+
+  /// 查找包含指定图片路径的库（按文件夹路径前缀匹配）。
+  ///
+  /// 双击打开的图片可能位于库文件夹的任意子目录中，因此用前缀而非精确匹配。
+  /// 同一文件夹可归属多个库，此时返回先命中的那个。找不到返回 null。
+  ///
+  /// [includeHidden] 为 false 时跳过隐藏库，保证切换到的是列表中可见的库。
+  ImageLibrary? libraryContainingPath(
+    String imagePath, {
+    bool includeHidden = true,
+  }) {
+    final image = _normalizePath(imagePath);
+    if (image.isEmpty) return null;
+    for (final lib in _libraries) {
+      if (!includeHidden && lib.hidden) continue;
+      for (final folder in lib.folderPaths) {
+        final root = _normalizePath(folder);
+        if (root.isEmpty) continue;
+        if (image == root || image.startsWith('$root/')) return lib;
+      }
+    }
+    return null;
+  }
+
+  /// 双击打开图片时自动切换库：
+  /// 若图片属于某个库且该库不是当前激活库，则切换并返回 true。
+  ///
+  /// 隐藏库仅在开启「显示隐藏媒体库」时才参与匹配：开关关闭时它不出现在
+  /// 列表中，切过去会与界面状态矛盾。
+  bool switchToLibraryForPath(String imagePath) {
+    final lib = libraryContainingPath(
+      imagePath,
+      includeHidden: _showHiddenLibraries,
+    );
+    if (lib == null || lib.id == _activeLibraryId) return false;
+    switchLibrary(lib.id);
+    return true;
+  }
+
+  /// 归一化路径用于前缀比较：统一分隔符、去掉末尾分隔符，Windows 下忽略大小写
+  static String _normalizePath(String path) {
+    var normalized = path.trim().replaceAll('\\', '/');
+    while (normalized.length > 1 && normalized.endsWith('/')) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
+    return Platform.isWindows ? normalized.toLowerCase() : normalized;
   }
 
   /// 用最新的连接信息替换同一条共享文件夹记录
@@ -515,24 +800,39 @@ class SettingsProvider extends ChangeNotifier {
   }
 
   void addExcludedPath(String path) {
-    if (!_excludedPaths.contains(path)) {
-      _excludedPaths.add(path);
-      notifyListeners();
-      _saveSettings();
-    }
+    // 排除记录归属于图片所在库（远程排除时激活库可能不是该文件所在的库）；
+    // 不属于任何库时归入当前激活库
+    final target =
+        libraryContainingPath(path, includeHidden: true) ?? activeLibrary;
+    final list = target?.excludedPaths ?? _excludedPaths;
+    if (list.contains(path)) return;
+    list.add(path);
+    notifyListeners();
+    _saveSettings();
   }
 
   void removeExcludedPath(String path) {
+    var changed = false;
+    // 恢复播放是全局语义：同一个图片可能在多个库里各自被排除过
+    for (final lib in _libraries) {
+      final before = lib.excludedPaths.length;
+      lib.excludedPaths.removeWhere((item) => item == path);
+      if (lib.excludedPaths.length != before) changed = true;
+    }
     final before = _excludedPaths.length;
     // 历史数据里可能存在重复路径，这里一次性全部移除
     _excludedPaths.removeWhere((item) => item == path);
-    if (_excludedPaths.length == before) return;
+    if (_excludedPaths.length != before) changed = true;
+    if (!changed) return;
     notifyListeners();
     _saveSettings();
   }
 
   void clearExcludedPaths() {
     _excludedPaths.clear();
+    for (final lib in _libraries) {
+      lib.excludedPaths.clear();
+    }
     notifyListeners();
     _saveSettings();
   }
@@ -541,9 +841,16 @@ class SettingsProvider extends ChangeNotifier {
   void removeExcludedPaths(Iterable<String> paths) {
     final targets = paths.toSet();
     if (targets.isEmpty) return;
+    var changed = false;
     final before = _excludedPaths.length;
     _excludedPaths.removeWhere(targets.contains);
-    if (_excludedPaths.length == before) return;
+    if (_excludedPaths.length != before) changed = true;
+    for (final lib in _libraries) {
+      final size = lib.excludedPaths.length;
+      lib.excludedPaths.removeWhere(targets.contains);
+      if (lib.excludedPaths.length != size) changed = true;
+    }
+    if (!changed) return;
     notifyListeners();
     _saveSettings();
   }
@@ -652,17 +959,71 @@ class SettingsProvider extends ChangeNotifier {
     _browseLayout = BrowseLayout.values[browseLayoutIndex];
     _closeToTray = prefs.getBool('closeToTray') ?? false;
 
+    // 先读语言，保证迁移时创建的默认库名称使用用户选择的语言
+    _languageIndex = prefs.getInt('languageIndex') ?? 0;
+
     _lastFolderPath = prefs.getString('lastFolderPath');
     final lastFolderPathsStr = prefs.getString('lastFolderPaths');
     if (lastFolderPathsStr != null) {
       _lastFolderPaths = json.decode(lastFolderPathsStr).cast<String>();
     }
+
+    // 多媒体库：优先读取已保存的库列表；老用户只有 lastFolderPaths 时
+    // 自动迁移为「默认媒体库」，文件夹、排序与进度都保持不变。
+    _libraries = [];
+    // 旧版本的库 JSON 没有 sharedFolderKeys 字段，需要把已登记的共享源
+    // 归入当前库（读取完 sharedFolders 后再执行，见下方）
+    var legacyLibraryFormat = false;
+    final librariesStr = prefs.getString('libraries');
+    if (librariesStr != null) {
+      try {
+        final decoded = json.decode(librariesStr);
+        if (decoded is List) {
+          for (final entry in decoded) {
+            if (entry is Map && entry['sharedFolderKeys'] is! List) {
+              legacyLibraryFormat = true;
+            }
+            final lib = ImageLibrary.fromJson(entry);
+            if (lib != null) _libraries.add(lib);
+          }
+        }
+      } catch (_) {
+        // 数据损坏时忽略，走下方迁移逻辑
+      }
+    }
+    _activeLibraryId = prefs.getString('activeLibraryId') ?? '';
+    final hasActive = _libraries.any((lib) => lib.id == _activeLibraryId);
+    if (_libraries.isEmpty && _lastFolderPaths.isNotEmpty) {
+      final defaultLib = ImageLibrary(
+        id: 'lib_default',
+        name: _defaultLibraryName(),
+        folderPaths: List<String>.of(_lastFolderPaths),
+      );
+      _libraries.add(defaultLib);
+      _activeLibraryId = defaultLib.id;
+    } else if (_libraries.isNotEmpty && !hasActive) {
+      _activeLibraryId = _libraries.first.id;
+    }
+    _showHiddenLibraries = prefs.getBool('showHiddenLibraries') ?? false;
+
     _showImageInfo = prefs.getBool('showImageInfo') ?? false;
 
     final excludedStr = prefs.getString('excludedPaths');
     if (excludedStr != null) {
       // 去掉历史数据中的重复路径，避免已排除统计翻倍
       _excludedPaths = json.decode(excludedStr).cast<String>().toSet().toList();
+    }
+    // 排除记录跟随媒体库：老用户只有全局列表，升级后归入当前激活库
+    if (_libraries.isNotEmpty && _excludedPaths.isNotEmpty) {
+      final lib = activeLibrary;
+      if (lib != null) {
+        for (final path in _excludedPaths) {
+          if (!lib.excludedPaths.contains(path)) {
+            lib.excludedPaths.add(path);
+          }
+        }
+      }
+      _excludedPaths = [];
     }
 
     _localSortModes = _decodeStringMap(prefs.getString('localSortModes'));
@@ -686,7 +1047,6 @@ class SettingsProvider extends ChangeNotifier {
     _deleteAction = DeleteAction.values[prefs.getInt('deleteAction') ?? 0];
     _imageOrientation =
         ImageOrientation.values[prefs.getInt('imageOrientation') ?? 2];
-    _languageIndex = prefs.getInt('languageIndex') ?? 0;
     _customInterval = prefs.getInt('customInterval') ?? 1800000;
     _useCustomInterval = prefs.getBool('useCustomInterval') ?? false;
 
@@ -726,6 +1086,28 @@ class SettingsProvider extends ChangeNotifier {
         // 数据损坏时忽略已添加的共享文件夹
       }
     }
+    // 旧版本的库没有共享绑定字段：把已登记的全部共享源归入当前库，
+    // 保持升级前的可见范围不变。
+    if (_libraries.isEmpty && _sharedFolders.isNotEmpty) {
+      final defaultLib = ImageLibrary(
+        id: 'lib_default',
+        name: _defaultLibraryName(),
+        folderPaths: List<String>.of(_lastFolderPaths),
+        sharedFolderKeys: [for (final ref in _sharedFolders) ref.key],
+      );
+      _libraries.add(defaultLib);
+      _activeLibraryId = defaultLib.id;
+    } else if (legacyLibraryFormat && _sharedFolders.isNotEmpty) {
+      final lib = activeLibrary;
+      if (lib != null) {
+        for (final ref in _sharedFolders) {
+          if (!lib.sharedFolderKeys.contains(ref.key)) {
+            lib.sharedFolderKeys.add(ref.key);
+          }
+        }
+      }
+    }
+
     _deviceId = prefs.getString('deviceId') ?? '';
     if (_deviceId.isEmpty) {
       _deviceId = _generateDeviceId();
@@ -756,6 +1138,17 @@ class SettingsProvider extends ChangeNotifier {
     } catch (_) {
       // 读取失败时保留默认名称
     }
+  }
+
+  /// 老数据迁移时创建的默认库名称。
+  ///
+  /// 通过 [AppLocalizations.fromIndex] 解析语言：索引 0（跟随系统）会按系统
+  /// 语言选择文案，其余索引与 [AppLanguage] 枚举一致。
+  String _defaultLibraryName() {
+    final loc = AppLocalizations.fromIndex(_languageIndex);
+    if (loc.isEn) return 'Default Library';
+    if (loc.isZhTW) return '預設媒體庫';
+    return '默认媒体库';
   }
 
   /// 解析存储为 JSON 的「字符串 → 字符串」映射，数据损坏时返回空表
@@ -839,5 +1232,13 @@ class SettingsProvider extends ChangeNotifier {
       json.encode(_sharedFolders.map((item) => item.toJson()).toList()),
     );
     await prefs.setString('deviceId', _deviceId);
+
+    // 多媒体库
+    await prefs.setString(
+      'libraries',
+      json.encode(_libraries.map((item) => item.toJson()).toList()),
+    );
+    await prefs.setString('activeLibraryId', _activeLibraryId);
+    await prefs.setBool('showHiddenLibraries', _showHiddenLibraries);
   }
 }

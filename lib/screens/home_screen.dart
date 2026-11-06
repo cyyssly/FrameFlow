@@ -45,6 +45,15 @@ class _HomeScreenState extends State<HomeScreen> {
     final path = widget.initialImagePath;
     if (!mounted || path == null) return;
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
+    final settingsProvider = Provider.of<SettingsProvider>(
+      context,
+      listen: false,
+    );
+    // 打开的图片若属于某个媒体库，先切到该库，让界面与播放内容一致；
+    // 不在任何库内则保持当前库不变。
+    if (settingsProvider.switchToLibraryForPath(path)) {
+      slideProvider.setFolderPaths(settingsProvider.lastFolderPaths);
+    }
     slideProvider.setImages([
       ImageItem(name: path.split(Platform.pathSeparator).last, path: path),
     ]);
@@ -200,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen> {
       listen: false,
     );
     final lanProvider = Provider.of<LanProvider>(context, listen: false);
-    final sharedRefs = settingsProvider.sharedFolders;
+    final sharedRefs = settingsProvider.activeLibrarySharedFolders;
 
     if (slideProvider.folderPaths.isEmpty && sharedRefs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -237,7 +246,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await lanProvider.probeSharedDevices(sharedRefs);
         for (final ref in sharedRefs) {
           if (!mounted) return;
-          if (!lanProvider.isDeviceReachable(ref.deviceId)) continue;
+          if (!lanProvider.isSharedFolderReachable(ref)) continue;
           setState(() {
             _scanStatusText = loc.readingSharedFolder(ref.folderName);
           });

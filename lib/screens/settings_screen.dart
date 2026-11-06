@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/services/windows_context_menu_service.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
@@ -262,6 +263,24 @@ class SettingsScreen extends StatelessWidget {
                   ],
                   settings.browseLayout,
                   (value) => settings.setBrowseLayout(value),
+                ),
+                _buildSwitchSetting(
+                  context,
+                  AppLocalizations.of(context).showHiddenLibraries,
+                  AppLocalizations.of(context).showHiddenLibrariesDesc,
+                  settings.showHiddenLibraries,
+                  (value) {
+                    // 关闭开关时若当前库是隐藏库，设置层会自动切到可见库，
+                    // 这里同步播放列表，避免仍停留在隐藏库的文件夹上
+                    if (settings.setShowHiddenLibraries(value)) {
+                      final slide = Provider.of<SlideProvider>(
+                        context,
+                        listen: false,
+                      );
+                      slide.setFolderPaths(settings.lastFolderPaths);
+                      slide.setImages(const []);
+                    }
+                  },
                 ),
               ],
             ),

@@ -107,6 +107,7 @@ Future<void> main(List<String> args) async {
       SingleInstanceService.instance.attach(
         navigatorKey: appNavigatorKey,
         slideProvider: slideProvider,
+        settingsProvider: settingsProvider,
       ),
     );
   });

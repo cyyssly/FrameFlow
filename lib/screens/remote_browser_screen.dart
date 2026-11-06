@@ -88,7 +88,7 @@ class _RemoteFoldersScreenState extends State<RemoteFoldersScreen> {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     final key = '${widget.device.id}/${folder.id}';
     if (selected) {
-      settings.removeSharedFolder(key);
+      settings.removeSharedFolderFromActiveLibrary(key);
       return;
     }
     settings.addSharedFolder(
@@ -121,12 +121,10 @@ class _RemoteFoldersScreenState extends State<RemoteFoldersScreen> {
     }
 
     final settings = Provider.of<SettingsProvider>(context);
-    final selectedIds = widget.selectMode
-        ? settings.sharedFolders
-              .where((ref) => ref.deviceId == widget.device.id)
-              .map((ref) => ref.folderId)
-              .toSet()
-        : const <String>{};
+    final selectedIds = settings.activeLibrarySharedFolders
+        .where((ref) => ref.deviceId == widget.device.id)
+        .map((ref) => ref.folderId)
+        .toSet();
 
     final list = ListView.separated(
       itemCount: _folders.length,

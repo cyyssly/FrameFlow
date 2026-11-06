@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:frame_flow/models/image_item.dart';
+import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/services/image_formats.dart';
 import 'package:window_manager/window_manager.dart';
@@ -22,6 +23,7 @@ class SingleInstanceService {
 
   GlobalKey<NavigatorState>? _navigatorKey;
   SlideProvider? _slideProvider;
+  SettingsProvider? _settingsProvider;
   String? _pendingPath;
 
   // 同一个路径可能同时来自实时回调与 takePendingPath，做一次短时去重
@@ -43,10 +45,12 @@ class SingleInstanceService {
   Future<void> attach({
     required GlobalKey<NavigatorState> navigatorKey,
     required SlideProvider slideProvider,
+    required SettingsProvider settingsProvider,
   }) async {
     if (!Platform.isWindows) return;
     _navigatorKey = navigatorKey;
     _slideProvider = slideProvider;
+    _settingsProvider = settingsProvider;
 
     final queued = _pendingPath;
     _pendingPath = null;
@@ -67,7 +71,8 @@ class SingleInstanceService {
   void _handle(String path) {
     final navigator = _navigatorKey?.currentState;
     final slide = _slideProvider;
-    if (navigator == null || slide == null) {
+    final settings = _settingsProvider;
+    if (navigator == null || slide == null || settings == null) {
       // Dart 还没准备好导航，先暂存
       _pendingPath = path;
       return;
@@ -83,12 +88,13 @@ class SingleInstanceService {
     _lastOpenedPath = path;
     _lastOpenedAt = now;
 
-    _openImage(navigator, slide, path);
+    _openImage(navigator, slide, settings, path);
   }
 
   Future<void> _openImage(
     NavigatorState navigator,
     SlideProvider slide,
+    SettingsProvider settings,
     String path,
   ) async {
     // 应用可能收在托盘里，先恢复并聚焦窗口
@@ -102,6 +108,11 @@ class SingleInstanceService {
 
     // 关掉当前播放页（以及可能存在的弹层），再播放新图片
     navigator.popUntil((route) => route.isFirst);
+    // 打开的图片若属于某个媒体库，先切到该库，让界面与播放内容一致；
+    // 不在任何库内则保持当前库不变。
+    if (settings.switchToLibraryForPath(path)) {
+      slide.setFolderPaths(settings.lastFolderPaths);
+    }
     slide.setImages([
       ImageItem(name: path.split(Platform.pathSeparator).last, path: path),
     ]);

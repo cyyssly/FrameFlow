@@ -7,6 +7,7 @@ import 'package:frame_flow/main.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/models/image_item.dart';
+import 'package:frame_flow/models/image_library.dart';
 import 'package:frame_flow/models/lan_models.dart';
 import 'package:frame_flow/providers/lan_provider.dart';
 import 'package:frame_flow/screens/excluded_images_screen.dart';
@@ -24,6 +25,23 @@ class FolderSelectionScreen extends StatefulWidget {
 
   @override
   State<FolderSelectionScreen> createState() => _FolderSelectionScreenState();
+}
+
+/// 归并后的本地文件夹条目。
+///
+/// 移动端把所有同名的相册路径合并成一个条目统一管理；桌面端每个路径
+/// 各自成为一个条目。
+class _LocalFolderGroup {
+  /// 展示名称：移动端为最后一级目录名，桌面端为完整路径
+  final String name;
+
+  /// 该条目实际包含的文件夹路径
+  final List<String> paths;
+
+  const _LocalFolderGroup(this.name, this.paths);
+
+  /// 播放/移除进行中状态的键（路径组合后保持稳定）
+  String get key => 'local:${paths.join('|')}';
 }
 
 /// “添加共享源”对话框的返回值：选择已有设备，或手动添加（device 为 null）
@@ -235,6 +253,305 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     }
   }
 
+  /// 显示媒体库管理弹层：切换 / 新建 / 重命名 / 删除
+  void _showLibrarySheet(BuildContext context) {
+    final loc = AppLocalizations.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF16213e),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) {
+        return Consumer<SettingsProvider>(
+          builder: (context, settings, _) {
+            final allLibs = settings.libraries;
+            // 关闭「显示隐藏媒体库」时，隐藏库完全不出现
+            final libs = settings.showHiddenLibraries
+                ? allLibs
+                : [
+                    for (final lib in allLibs)
+                      if (!lib.hidden) lib,
+                  ];
+            return SafeArea(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          const Icon(Icons.photo_library, color: Colors.white),
+                          const SizedBox(width: 8),
+                          Text(
+                            loc.mediaLibraries,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (libs.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Text(
+                            allLibs.isEmpty
+                                ? loc.noLibrariesHint
+                                : loc.hiddenLibrariesCollapsed,
+                            style: const TextStyle(color: Colors.grey),
+                          ),
+                        )
+                      else
+                        ...libs.map((lib) {
+                          final isActive = lib.id == settings.activeLibraryId;
+                          final tile = ListTile(
+                            leading: Icon(
+                              isActive
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_unchecked,
+                              color: isActive
+                                  ? const Color(0xFF00b894)
+                                  : Colors.white54,
+                            ),
+                            title: Text(
+                              lib.name,
+                              style: TextStyle(
+                                color: isActive ? Colors.white : Colors.white70,
+                                fontWeight: isActive
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            subtitle: Text(
+                              loc.libraryItemCount(
+                                lib.folderPaths.length,
+                                lib.sharedFolderKeys.length,
+                              ),
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
+                            ),
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              _switchToLibrary(lib.id);
+                            },
+                            trailing: PopupMenuButton<String>(
+                              icon: const Icon(
+                                Icons.more_vert,
+                                color: Colors.white54,
+                              ),
+                              onSelected: (action) {
+                                if (action == 'rename') {
+                                  _renameLibrary(context, settings, lib);
+                                } else if (action == 'hide') {
+                                  _setLibraryHidden(lib);
+                                } else if (action == 'delete') {
+                                  _deleteLibrary(context, settings, lib);
+                                }
+                              },
+                              itemBuilder: (_) => [
+                                PopupMenuItem(
+                                  value: 'rename',
+                                  child: Text(loc.renameLibrary),
+                                ),
+                                PopupMenuItem(
+                                  value: 'hide',
+                                  child: Text(
+                                    lib.hidden
+                                        ? loc.unhideLibrary
+                                        : loc.hideLibrary,
+                                  ),
+                                ),
+                                // 只剩一个库时禁止删除
+                                if (allLibs.length > 1)
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text(
+                                      loc.deleteLibrary,
+                                      style: const TextStyle(
+                                        color: Colors.redAccent,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                          // 隐藏库在开启「显示隐藏媒体库」时以半透明展示
+                          return lib.hidden
+                              ? Opacity(opacity: 0.5, child: tile)
+                              : tile;
+                        }),
+                      const Divider(color: Colors.white12),
+                      TextButton.icon(
+                        onPressed: () => _createLibrary(context, settings),
+                        icon: const Icon(Icons.add),
+                        label: Text(loc.newLibrary),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFF00b894),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 切换到指定库：同步文件夹列表、清空旧图片并重新统计
+  void _switchToLibrary(String id) {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    if (settings.activeLibraryId == id) return;
+    settings.switchLibrary(id);
+    _syncAfterLibraryChange();
+  }
+
+  /// 切换某个库的隐藏状态；若因此换了激活库，一并同步播放与统计
+  void _setLibraryHidden(ImageLibrary lib) {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    final activeChanged = settings.setLibraryHidden(lib.id, !lib.hidden);
+    if (activeChanged) _syncAfterLibraryChange();
+  }
+
+  /// 激活库变化后同步 SlideProvider 的文件夹，并刷新统计与共享源探测
+  void _syncAfterLibraryChange() {
+    final settings = Provider.of<SettingsProvider>(context, listen: false);
+    final slide = Provider.of<SlideProvider>(context, listen: false);
+    slide.setFolderPaths(settings.lastFolderPaths);
+    slide.setImages(const []);
+    setState(_folderStats.clear);
+    _refreshStats();
+    _probeSharedDevices();
+  }
+
+  Future<void> _createLibrary(
+    BuildContext context,
+    SettingsProvider settings,
+  ) async {
+    final loc = AppLocalizations.of(context);
+    var text = '';
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        title: Text(loc.newLibrary),
+        content: TextFormField(
+          initialValue: '',
+          autofocus: true,
+          decoration: InputDecoration(hintText: loc.libraryNameHint),
+          onChanged: (value) => text = value,
+          onFieldSubmitted: (value) => Navigator.pop(dlgCtx, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx),
+            child: Text(loc.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx, text),
+            child: Text(loc.confirm),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.trim().isEmpty) return;
+
+    settings.addLibrary(name);
+    if (!context.mounted) return;
+    _syncAfterLibraryChange();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(loc.pleaseAddFolder),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _renameLibrary(
+    BuildContext context,
+    SettingsProvider settings,
+    ImageLibrary lib,
+  ) async {
+    final loc = AppLocalizations.of(context);
+    var text = lib.name;
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        title: Text(loc.renameLibrary),
+        content: TextFormField(
+          initialValue: lib.name,
+          autofocus: true,
+          decoration: InputDecoration(hintText: loc.libraryNameHint),
+          onChanged: (value) => text = value,
+          onFieldSubmitted: (value) => Navigator.pop(dlgCtx, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx),
+            child: Text(loc.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx, text),
+            child: Text(loc.confirm),
+          ),
+        ],
+      ),
+    );
+    if (name != null) settings.renameLibrary(lib.id, name);
+  }
+
+  Future<void> _deleteLibrary(
+    BuildContext context,
+    SettingsProvider settings,
+    ImageLibrary lib,
+  ) async {
+    final loc = AppLocalizations.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        content: Text(loc.confirmDeleteLibrary),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx, false),
+            child: Text(loc.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dlgCtx, true),
+            child: Text(
+              loc.deleteLibrary,
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final wasActive = settings.activeLibraryId == lib.id;
+    settings.removeLibrary(lib.id);
+    if (!wasActive || !context.mounted) return;
+    _syncAfterLibraryChange();
+  }
+
   /// 计算文件夹中的图片数量和子文件夹数量
   Future<void> _countFolderImages(String folderPath) async {
     if (_scanningFolders.contains(folderPath)) return;
@@ -402,14 +719,33 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     return clean;
   }
 
-  /// 构建文件夹统计信息的 widget
-  Widget _buildFolderStats(String folderPath) {
+  /// 把本地文件夹按条目归并：
+  /// - 移动端：所有同名的相册归为一个条目
+  /// - 桌面端：一个路径一个条目
+  List<_LocalFolderGroup> _groupLocalPaths(List<String> paths) {
+    if (!Platform.isAndroid) {
+      return [
+        for (final path in paths) _LocalFolderGroup(path, [path]),
+      ];
+    }
+    final byName = <String, List<String>>{};
+    for (final path in paths) {
+      byName.putIfAbsent(_getLastPathSegment(path), () => []).add(path);
+    }
+    return [
+      for (final entry in byName.entries)
+        _LocalFolderGroup(entry.key, entry.value),
+    ];
+  }
+
+  /// 构建文件夹统计信息的 widget（同名条目会把各路径的数量相加）
+  Widget _buildFolderStats(_LocalFolderGroup group) {
     final settingsProvider = Provider.of<SettingsProvider>(
       context,
       listen: false,
     );
 
-    if (_scanningFolders.contains(folderPath)) {
+    if (group.paths.any(_scanningFolders.contains)) {
       return const SizedBox(
         width: 16,
         height: 16,
@@ -417,13 +753,19 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       );
     }
 
-    final stats = _folderStats[folderPath];
-    if (stats == null) {
+    var hasStats = false;
+    var imageCount = 0;
+    var subfolderCount = 0;
+    for (final path in group.paths) {
+      final stats = _folderStats[path];
+      if (stats == null) continue;
+      hasStats = true;
+      imageCount += stats['imageCount'] ?? 0;
+      subfolderCount += stats['subfolderCount'] ?? 0;
+    }
+    if (!hasStats) {
       return const SizedBox.shrink();
     }
-
-    final imageCount = stats['imageCount'] ?? 0;
-    final subfolderCount = stats['subfolderCount'] ?? 0;
 
     String countText;
     if (settingsProvider.recursiveScan && subfolderCount > 0) {
@@ -442,25 +784,32 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     );
   }
 
-  void _removeFolder(String path) {
+  void _removeFolderGroup(_LocalFolderGroup group) {
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
     final settingsProvider = Provider.of<SettingsProvider>(
       context,
       listen: false,
     );
-    slideProvider.removeFolderPath(path);
+    for (final path in group.paths) {
+      slideProvider.removeFolderPath(path);
+    }
     settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
 
     // 清除缓存的统计信息
     setState(() {
-      _folderStats.remove(path);
-      _scanningFolders.remove(path);
+      for (final path in group.paths) {
+        _folderStats.remove(path);
+        _scanningFolders.remove(path);
+      }
     });
   }
 
-  /// 直接播放某个已选文件夹：以该文件夹为播放范围进入幻灯
-  Future<void> _playFolder(String path) async {
-    if (_playingFolders.contains(path)) return;
+  /// 直接播放某个已选文件夹：以该文件夹为播放范围进入幻灯。
+  ///
+  /// 移动端同名文件夹归并为一个条目，这里会合并所有路径的图片并去重。
+  Future<void> _playFolderGroup(_LocalFolderGroup group) async {
+    final groupKey = group.key;
+    if (_playingFolders.contains(groupKey)) return;
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
     final settingsProvider = Provider.of<SettingsProvider>(
       context,
@@ -468,11 +817,17 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     );
 
     setState(() {
-      _playingFolders.add(path);
+      _playingFolders.add(groupKey);
     });
 
     try {
-      final images = await _scanFolder(path, settingsProvider);
+      final unique = <String, ImageItem>{};
+      for (final path in group.paths) {
+        for (final image in await _scanFolder(path, settingsProvider)) {
+          unique.putIfAbsent(image.key, () => image);
+        }
+      }
+      final images = unique.values.toList();
       if (!mounted) return;
       if (images.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -496,7 +851,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     } finally {
       if (mounted) {
         setState(() {
-          _playingFolders.remove(path);
+          _playingFolders.remove(groupKey);
         });
       }
     }
@@ -736,7 +1091,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   Future<void> _playSharedSection() async {
     if (_isScanning) return;
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    final refs = settings.sharedFolders;
+    final refs = settings.activeLibrarySharedFolders;
     if (refs.isEmpty) return;
     await _playSharedFolders(refs);
   }
@@ -756,7 +1111,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       final unique = <String, ImageItem>{};
       for (final ref in refs) {
         if (!mounted) return;
-        if (!lan.isDeviceReachable(ref.deviceId)) continue;
+        if (!lan.isSharedFolderReachable(ref)) continue;
         setState(() {
           _scanStatus = AppLocalizations.of(
             context,
@@ -818,13 +1173,12 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   /// 重新连接全部共享文件夹
   Future<void> _refreshAllSharedFolders() async {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    if (settings.sharedFolders.isEmpty) return;
+    final refs = settings.activeLibrarySharedFolders;
+    if (refs.isEmpty) return;
     final lan = Provider.of<LanProvider>(context, listen: false);
-    await lan.refreshSharedFolders(settings.sharedFolders);
+    await lan.refreshSharedFolders(refs);
     if (!mounted) return;
-    if (settings.sharedFolders.every(
-      (ref) => !lan.isDeviceReachable(ref.deviceId),
-    )) {
+    if (refs.every((ref) => !lan.isSharedFolderReachable(ref))) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(AppLocalizations.of(context).lanLoadFailed),
@@ -978,7 +1332,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     );
     final lanProvider = Provider.of<LanProvider>(context, listen: false);
     final loc = AppLocalizations.of(context);
-    final sharedRefs = settingsProvider.sharedFolders;
+    final sharedRefs = settingsProvider.activeLibrarySharedFolders;
 
     if (slideProvider.folderPaths.isEmpty && sharedRefs.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1040,7 +1394,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
         await lanProvider.probeSharedDevices(sharedRefs);
         for (final ref in sharedRefs) {
           if (!mounted) return;
-          if (!lanProvider.isDeviceReachable(ref.deviceId)) continue;
+          if (!lanProvider.isSharedFolderReachable(ref)) continue;
           setState(() {
             _scanStatus = AppLocalizations.of(
               context,
@@ -1189,8 +1543,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   Future<void> _probeSharedDevices() async {
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     final lan = Provider.of<LanProvider>(context, listen: false);
-    if (settings.sharedFolders.isEmpty) return;
-    final refs = List<SharedFolderRef>.of(settings.sharedFolders);
+    final refs = List<SharedFolderRef>.of(settings.activeLibrarySharedFolders);
     await lan.probeSharedDevices(refs);
     if (!mounted) return;
     lan.loadSharedFolderCovers(refs);
@@ -1211,8 +1564,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     if (!mounted) return;
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     final lan = Provider.of<LanProvider>(context, listen: false);
-    final offline = settings.sharedFolders
-        .where((ref) => !lan.isDeviceReachable(ref.deviceId))
+    final offline = settings.activeLibrarySharedFolders
+        .where((ref) => !lan.isSharedFolderReachable(ref))
         .toList();
     if (offline.isEmpty) {
       _reconnectAttempt = 0;
@@ -1267,20 +1620,39 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     return Scaffold(
       appBar: AppBar(
         // 移动端列表里是相册，标题也统一为“选择相册”
-        title: Text(
-          Platform.isAndroid ? loc.selectAlbumTitle : loc.selectFolderTitle,
+        title: Consumer<SettingsProvider>(
+          builder: (context, settings, _) {
+            final lib = settings.activeLibrary;
+            final defaultTitle = Platform.isAndroid
+                ? loc.selectAlbumTitle
+                : loc.selectFolderTitle;
+            return Text(
+              lib == null ? defaultTitle : '$defaultTitle · ${lib.name}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            );
+          },
         ),
         centerTitle: true,
         backgroundColor: const Color(0xFF16213e),
+        actions: [
+          IconButton(
+            tooltip: loc.activeLibraryHint,
+            icon: const Icon(Icons.photo_library),
+            onPressed: () => _showLibrarySheet(context),
+          ),
+        ],
       ),
       body: Consumer2<SlideProvider, SettingsProvider>(
         builder: (context, slideProvider, settingsProvider, child) {
           final lan = Provider.of<LanProvider>(context);
           final localPaths = slideProvider.folderPaths;
-          final sharedFolders = settingsProvider.sharedFolders;
+          // 移动端同名文件夹归并为一个条目管理
+          final localGroups = _groupLocalPaths(localPaths);
+          final sharedFolders = settingsProvider.activeLibrarySharedFolders;
           // 有任一共享文件夹离线时，标题栏只提供重连入口
           final anySharedOffline = sharedFolders.any(
-            (ref) => !lan.isDeviceReachable(ref.deviceId),
+            (ref) => !lan.isSharedFolderReachable(ref),
           );
           return Padding(
             // 手机端横向空间紧张，缩小页面左右边距
@@ -1309,8 +1681,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
                             ),
                           ],
                         ),
-                        for (final path in localPaths)
-                          _buildLocalFolderTile(path, settingsProvider, lan),
+                        for (final group in localGroups)
+                          _buildLocalFolderTile(group, settingsProvider, lan),
                       ],
                       if (localPaths.isNotEmpty && sharedFolders.isNotEmpty)
                         const Divider(height: 1, color: Colors.grey),
@@ -1518,17 +1890,19 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
 
   /// 本地文件夹条目：第 2 行统计信息，第 3 行显示本机终端名与 IP
   Widget _buildLocalFolderTile(
-    String path,
+    _LocalFolderGroup group,
     SettingsProvider settings,
     LanProvider lan,
   ) {
     final ip = lan.localAddresses.isNotEmpty
         ? lan.localAddresses.first
         : '127.0.0.1';
+    final primaryPath = group.paths.first;
+    final groupKey = group.key;
     return _folderRow(
       // 使用稳定的 Key 绑定到文件夹路径，避免 ListView 按位置复用 State，
       // 导致缩略图组件残留上一个位置的图片
-      key: ValueKey('folder-$path'),
+      key: ValueKey('folder-$groupKey'),
       leading: ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: SizedBox(
@@ -1536,19 +1910,18 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
           height: 56,
           child: _ThumbnailImage(
             // 排除列表变化时重建，避免沿用排除前缓存的封面
-            key: ValueKey('thumb-$path-${settings.excludedPaths.length}'),
+            key: ValueKey('thumb-$groupKey-${settings.excludedPaths.length}'),
             thumbnailPath: null,
-            albumPath: path,
+            albumPath: primaryPath,
           ),
         ),
       ),
-      // 安卓端手机宽度有限，只显示最后一级文件夹名；Windows 端保留完整路径
-      title: Platform.isAndroid ? _getLastPathSegment(path) : path,
+      title: group.name,
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildFolderStats(path),
+          _buildFolderStats(group),
           const SizedBox(height: 2),
           Text(
             '${settings.deviceName} · $ip',
@@ -1563,28 +1936,31 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       actions: [
         _actionButton(
           tooltip: AppLocalizations.of(context).playFolder,
-          icon: _playingFolders.contains(path)
+          icon: _playingFolders.contains(groupKey)
               ? const SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.play_circle_outline, color: Colors.green),
-          onPressed: _playingFolders.contains(path)
+          onPressed: _playingFolders.contains(groupKey)
               ? null
-              : () => _playFolder(path),
+              : () => _playFolderGroup(group),
         ),
         _actionButton(
           tooltip: AppLocalizations.of(context).removeFromManage,
           icon: const Icon(Icons.remove_circle_outline, color: Colors.orange),
-          onPressed: () => _removeFolder(path),
+          onPressed: () => _removeFolderGroup(group),
         ),
       ],
       onTap: () {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => FolderImagesScreen(folderPath: path),
+            builder: (context) => FolderImagesScreen(
+              folderPath: primaryPath,
+              extraFolderPaths: group.paths.skip(1).toList(),
+            ),
           ),
         );
       },
@@ -1603,7 +1979,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   /// 共享文件夹条目：离线时整体灰显，播放按钮禁用，仍可排除与重连
   Widget _buildSharedFolderTile(SharedFolderRef ref, LanProvider lan) {
     final loc = AppLocalizations.of(context);
-    final online = lan.isDeviceReachable(ref.deviceId);
+    final online = lan.isSharedFolderReachable(ref);
     final device = lan.deviceById(ref.deviceId);
     final deviceName = device?.name ?? ref.deviceName;
     final address = device?.address ?? ref.address;
@@ -1702,7 +2078,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
             Provider.of<SettingsProvider>(
               context,
               listen: false,
-            ).removeSharedFolder(ref.key);
+            ).removeSharedFolderFromActiveLibrary(ref.key);
           },
         ),
       ],

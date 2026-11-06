@@ -15,6 +15,9 @@ class HelpScreen extends StatefulWidget {
   const HelpScreen({super.key});
 
   static const String githubUrl = 'https://github.com/cyyssly/FrameFlow';
+
+  /// 姐妹应用 SteamFlow 的项目主页
+  static const String steamFlowUrl = 'https://github.com/cyyssly/SteamFlow';
   static const String sponsorUrl = 'https://ifdian.net/a/sly345678/plan';
 
   /// 宽度达到该值（且非手机端）时使用两栏布局
@@ -163,10 +166,19 @@ class _HelpScreenState extends State<HelpScreen> {
     _bullet(loc.helpCopyImages),
   ];
 
-  /// 关于：版本信息 + GitHub 链接
+  /// 关于：版本信息 + GitHub 链接 + 姐妹应用 SteamFlow
   List<Widget> _aboutChildren(AppLocalizations loc) => [
     _infoRow(Icons.info_outline, loc.helpVersionLabel, appVersionLabel),
     _linkRow(Icons.code, loc.helpGitHub, HelpScreen.githubUrl),
+    _groupTitle(loc.helpSisterAppTitle),
+    Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        loc.helpSisterAppDesc,
+        style: const TextStyle(fontSize: 14, color: Colors.white70),
+      ),
+    ),
+    _linkRow(Icons.video_library, 'SteamFlow', HelpScreen.steamFlowUrl),
   ];
 
   /// 赞助：简短说明 + 赞助页链接

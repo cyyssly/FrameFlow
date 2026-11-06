@@ -62,6 +62,13 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 共享源设备的可达状态（deviceId -> 是否可连接）
   final Map<String, bool> _reachable = {};
 
+  /// 共享文件夹的可用状态
+  /// （ref.key -> 设备在线且对方仍在共享该文件夹）。
+  ///
+  /// 设备在线不代表它仍在共享某个文件夹：切换媒体库后，原来库里的共享
+  /// 文件夹可能已被对方取消共享，此时不能按设备在线显示为可播放。
+  final Map<String, bool> _folderReachable = {};
+
   /// 正在探测的设备，避免同一设备并发探测
   final Set<String> _probing = {};
 
@@ -146,6 +153,12 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   bool isDeviceReachable(String deviceId) => _reachable[deviceId] ?? false;
 
+  /// 某个共享文件夹当前是否可用：设备在线，且对方仍在共享该文件夹。
+  ///
+  /// 尚未探测过该文件夹时回退到设备在线状态，避免首次进入页面时误显示离线。
+  bool isSharedFolderReachable(SharedFolderRef ref) =>
+      _folderReachable[ref.key] ?? isDeviceReachable(ref.deviceId);
+
   /// 远端设备允许的操作；未探测到时视为全部不支持
   RemoteCapabilities capabilitiesFor(String deviceId) =>
       _capabilities[deviceId] ?? RemoteCapabilities.none;
@@ -182,27 +195,47 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 并行探测共享源设备是否在线，用于界面显示离线灰态
   Future<void> probeSharedDevices(List<SharedFolderRef> refs) async {
-    final seen = <String>{};
-    final futures = <Future<void>>[];
+    // 同一设备的多个文件夹只需请求一次设备信息，
+    // 再据此逐个判断这些文件夹是否仍在共享
+    final byDevice = <String, List<SharedFolderRef>>{};
     for (final ref in refs) {
-      if (!seen.add(ref.deviceId)) continue;
-      futures.add(_probeDevice(ref));
+      byDevice.putIfAbsent(ref.deviceId, () => []).add(ref);
     }
-    if (futures.isEmpty) return;
-    await Future.wait(futures);
+    if (byDevice.isEmpty) return;
+    await Future.wait([
+      for (final group in byDevice.values) _probeDeviceGroup(group),
+    ]);
     if (!_disposed) notifyListeners();
   }
 
-  Future<void> _probeDevice(SharedFolderRef ref) async {
-    if (!_probing.add(ref.deviceId)) return;
+  Future<void> _probeDeviceGroup(List<SharedFolderRef> refs) async {
+    final deviceId = refs.first.deviceId;
+    if (!_probing.add(deviceId)) return;
     try {
       final info = await LanClientService.instance.fetchInfo(
-        resolveDevice(ref),
+        resolveDevice(refs.first),
       );
-      _reachable[ref.deviceId] = info != null;
-      if (info != null) _updateCapabilities(ref.deviceId, info);
+      _reachable[deviceId] = info != null;
+      if (info == null) {
+        for (final ref in refs) {
+          _folderReachable[ref.key] = false;
+        }
+        return;
+      }
+      _updateCapabilities(deviceId, info);
+      // 设备在线还要确认文件夹仍被远端共享（远端切换媒体库后可能已消失）
+      final folders = await LanClientService.instance.fetchFolders(
+        resolveDevice(refs.first),
+      );
+      final ids = {
+        for (final folder in folders ?? const <RemoteFolder>[]) folder.id,
+      };
+      for (final ref in refs) {
+        _folderReachable[ref.key] =
+            folders != null && ids.contains(ref.folderId);
+      }
     } finally {
-      _probing.remove(ref.deviceId);
+      _probing.remove(deviceId);
     }
   }
 
@@ -214,19 +247,19 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
     return ok;
   }
 
-  /// 重新连接全部共享源（同一设备只请求一次）
+  /// 重新连接全部共享源（同一设备只请求一次，逐个校验文件夹是否仍被共享）
   Future<void> refreshSharedFolders(List<SharedFolderRef> refs) async {
-    final seen = <String>{};
-    final futures = <Future<void>>[];
+    final byDevice = <String, List<SharedFolderRef>>{};
     for (final ref in refs) {
-      if (!seen.add(ref.deviceId)) continue;
-      futures.add(_refreshSharedFolder(ref));
+      byDevice.putIfAbsent(ref.deviceId, () => []).add(ref);
     }
-    if (futures.isEmpty) return;
-    await Future.wait(futures);
-    // 离线设备保留上次的封面，避免断连后缩略图直接消失
+    if (byDevice.isEmpty) return;
+    await Future.wait([
+      for (final group in byDevice.values) _refreshDeviceFolders(group),
+    ]);
+    // 离线文件夹保留上次的封面，避免断连后缩略图直接消失
     for (final ref in refs) {
-      if (!isDeviceReachable(ref.deviceId)) continue;
+      if (!isSharedFolderReachable(ref)) continue;
       _coverFailed.remove(ref.key);
     }
     await Future.wait([for (final ref in refs) _loadCover(ref)]);
@@ -234,36 +267,61 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<bool> _refreshSharedFolder(SharedFolderRef ref) async {
-    final device = resolveDevice(ref);
+    final results = await _refreshDeviceFolders([ref]);
+    return results[ref.key] ?? false;
+  }
+
+  /// 校验并同步一台设备上的一组共享文件夹。
+  ///
+  /// 返回每个文件夹是否仍可播放：设备在线但远端已不再共享该文件夹时
+  /// （例如远端切换了媒体库），同样按不可播放处理。
+  Future<Map<String, bool>> _refreshDeviceFolders(
+    List<SharedFolderRef> refs,
+  ) async {
+    final device = resolveDevice(refs.first);
+    final deviceId = refs.first.deviceId;
+    final results = <String, bool>{};
     // 先做一次轻量的在线确认：真正掉线时 4 秒内即可失败，
     // 不必把文件夹列表的长超时等满
     final info = await LanClientService.instance.fetchInfo(device);
     if (info == null) {
-      _reachable[ref.deviceId] = false;
-      return false;
+      _reachable[deviceId] = false;
+      for (final ref in refs) {
+        _folderReachable[ref.key] = false;
+        results[ref.key] = false;
+      }
+      return results;
     }
-    _reachable[ref.deviceId] = true;
-    _updateCapabilities(ref.deviceId, info);
+    _reachable[deviceId] = true;
+    _updateCapabilities(deviceId, info);
     final folders = await LanClientService.instance.fetchFolders(device);
-    if (folders == null) return false;
 
-    RemoteFolder? match;
-    for (final folder in folders) {
-      if (folder.id == ref.folderId) {
-        match = folder;
-        break;
+    for (final ref in refs) {
+      RemoteFolder? match;
+      if (folders != null) {
+        for (final folder in folders) {
+          if (folder.id == ref.folderId) {
+            match = folder;
+            break;
+          }
+        }
+      }
+      // 远端已不再共享该文件夹时按离线处理
+      _folderReachable[ref.key] = match != null;
+      results[ref.key] = match != null;
+      if (match != null) {
+        _settings.updateSharedFolder(
+          ref.copyWith(
+            deviceName: device.name,
+            host: device.host,
+            port: device.port,
+            folderName: match.name,
+            imageCount: match.imageCount,
+          ),
+        );
       }
     }
-    _settings.updateSharedFolder(
-      ref.copyWith(
-        deviceName: device.name,
-        host: device.host,
-        port: device.port,
-        folderName: match?.name,
-        imageCount: match?.imageCount,
-      ),
-    );
-    return match != null;
+    return results;
   }
 
   /// 读取共享文件夹的全部图片元数据，失败时返回 null
@@ -274,14 +332,18 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
     final info = await LanClientService.instance.fetchInfo(device);
     if (info == null) {
       _reachable[ref.deviceId] = false;
+      _folderReachable[ref.key] = false;
       if (!_disposed) notifyListeners();
       return null;
     }
     _reachable[ref.deviceId] = true;
+    _updateCapabilities(ref.deviceId, info);
     final images = await LanClientService.instance.fetchAllImages(
       device,
       folderId: ref.folderId,
     );
+    // 设备在线但取不到图片，说明远端已不再共享该文件夹（例如远端切换了媒体库）
+    _folderReachable[ref.key] = images != null;
     if (!_disposed) notifyListeners();
     return images;
   }
@@ -582,7 +644,7 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
           deviceName: _settings.deviceName,
           folderPaths: () => sharedLocalFolders,
           recursiveScan: () => _settings.recursiveScan,
-          excludedPaths: () => _settings.excludedPaths,
+          excludedPaths: () => _settings.allExcludedPaths,
           remoteExcludeEnabled: () => _settings.allowRemoteExclude,
           remoteCopyEnabled: () => _settings.allowRemoteCopy,
           onExcludedPath: _settings.addExcludedPath,
