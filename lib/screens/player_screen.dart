@@ -169,6 +169,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _wasPlayingBeforeDelete = false;
   bool _showDeleteMessage = false;
   String _deleteMessageText = '';
+
+  /// 是否已触发退出播放页。
+  ///
+  /// 退场动画期间播放页仍挂在组件树上、全局键盘监听依然有效，
+  /// ESC 连按时会再次触发 pop，把栈底的主界面也弹掉，导航器变空 → 黑屏。
+  bool _isExiting = false;
   double _autoRotation = 0.0;
   int _lastProcessedIndex = -1;
 
@@ -1315,19 +1321,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// 顺序必须是「先恢复窗口、再 pop」：反过来的话，pop 动画与主界面会按旧的
   /// 全屏尺寸布局，出现主界面错位、按钮点不动。左上角返回按钮与本方法共用。
   void _popWithFullscreenRestore() {
-    if (!_isFullscreen) {
-      Navigator.pop(context);
-      return;
-    }
+    // 已经触发过退出：ESC 连按 / 返回按钮重复点击都不再重复出栈
+    if (_isExiting) return;
+    _isExiting = true;
+
+    final navigator = Navigator.of(context);
     final sizeBefore = MediaQuery.sizeOf(context);
     final watch = Stopwatch()..start();
-    _exitFullscreen();
-    final navigator = Navigator.of(context);
-    _runAfterResize(
-      () => navigator.pop(),
-      sizeBefore: sizeBefore,
-      watch: watch,
-    );
+    final needsResize = _isFullscreen;
+    if (needsResize) {
+      _exitFullscreen();
+    }
+
+    void leavePlayer() {
+      if (!navigator.mounted) return;
+      if (navigator.canPop()) {
+        navigator.pop();
+        return;
+      }
+      // 播放页是导航栈里的唯一页面时，pop 会让导航器变空（画面全黑），
+      // 改为直接用主界面替换播放页。
+      navigator.pushReplacementNamed('/');
+    }
+
+    if (!needsResize) {
+      leavePlayer();
+      return;
+    }
+    _runAfterResize(leavePlayer, sizeBefore: sizeBefore, watch: watch);
   }
 
   /// 等待视图尺寸生效的最长时间。超过它就直接执行后续动作，
