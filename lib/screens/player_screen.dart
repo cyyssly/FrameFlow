@@ -16,6 +16,7 @@ import 'package:frame_flow/l10n/app_localizations.dart';
 import 'package:frame_flow/services/copy_service.dart';
 import 'package:frame_flow/services/lan_client_service.dart';
 import 'package:frame_flow/services/fullscreen_service.dart';
+import 'package:frame_flow/services/media_store_service.dart';
 import 'package:frame_flow/utils/rotated_fit.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -175,6 +176,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// 退场动画期间播放页仍挂在组件树上、全局键盘监听依然有效，
   /// ESC 连按时会再次触发 pop，把栈底的主界面也弹掉，导航器变空 → 黑屏。
   bool _isExiting = false;
+
+  /// 删除确认对话框是否已打开。
+  ///
+  /// 对话框打开期间播放页的全局键盘监听依然生效，方向键会被播放页截获去
+  /// 切换图片，而不是在「取消 / 确定」之间移动焦点。这里用标记把按键交还给
+  /// 对话框，避免边选按钮边换图。
+  bool _isDeleteDialogOpen = false;
   double _autoRotation = 0.0;
   int _lastProcessedIndex = -1;
 
@@ -451,6 +459,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ? AppLocalizations.of(context).excludeFromPlay
         : AppLocalizations.of(context).deleteFromDisk;
 
+    _isDeleteDialogOpen = true;
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -485,7 +494,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ],
       ),
-    );
+    ).whenComplete(() {
+      _isDeleteDialogOpen = false;
+    });
   }
 
   /// 显示删除通知（自定义覆盖层，在全屏模式下也能显示）
@@ -516,11 +527,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (currentImage.isRemote) return true;
 
     if (action == DeleteAction.delete) {
-      // 实际删除文件
-      try {
-        await File(currentImage.path).delete();
-      } catch (e) {
-        // 文件删除失败，可能是文件被占用（使用自定义覆盖层，在全屏模式下也能显示）
+      // 实际删除文件：移入系统回收站，误删后还能找回
+      // （Android 走 MediaStore 回收站，Windows 走回收站，其他平台直接删除）
+      final deleted = await MediaStoreService.deleteToTrash([
+        currentImage.path,
+      ]);
+      if (!deleted) {
+        // 删除失败，可能是文件被占用（使用自定义覆盖层，在全屏模式下也能显示）
         if (mounted) {
           _showDeleteNotification(AppLocalizations.of(context).deleteFailed);
         }
@@ -541,6 +554,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       return false;
     } else {
+      // 列表里已经换成下一张，重置缩放状态，避免新图延续上一张的放大/位移
+      _resetViewTransform();
       // 移除当前图后已切到下一张，重置自动播放计时器，
       // 避免沿用上一张的到期时间而立刻跳图
       _startAutoPlay();
@@ -575,21 +590,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// [manual] 为 true 表示由用户手动触发（键盘/滚轮/滑动/工具栏按钮），
   /// 切换后需要重置自动播放计时器。
   void _nextImage({bool manual = false}) {
+    // 删除确认框未关闭前禁止切图：键盘、滚轮、滑动、工具栏按钮都走这里，
+    // 在这里挡一次即可覆盖全部入口。
+    if (_isDeleteDialogOpen) return;
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
 
     // 放大查看细节时不自动切图，避免用户正在看时被定时器切走
     if (!manual && _isZoomed) return;
 
-    if (_scale != _minScale) {
-      setState(() {
-        _scale = _minScale;
-        _rotation = 0.0;
-        _position = Offset.zero;
-        _edgeOverflow = 0.0;
-        // 切图后回到原尺寸，不再需要“放大暂停”标记
-        _zoomSuspended = false;
-      });
-    }
+    _resetViewTransform();
 
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     // 从瀑布流进入时按列表既有顺序（即其当前排序）播放，忽略设置页的随机模式
@@ -651,18 +660,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// 手动切换到上一张图片（键盘/滚轮/滑动/工具栏按钮触发）。
   /// 切换后重置自动播放计时器，让等待时间从当前时刻重新计算。
   void _prevImage() {
+    // 删除确认框未关闭前禁止切图（与 _nextImage 同理）
+    if (_isDeleteDialogOpen) return;
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     // 切图后回到「适应屏幕」状态，避免新图带着上一张的缩放/位移
-    if (_scale != _minScale) {
-      setState(() {
-        _scale = _minScale;
-        _rotation = 0.0;
-        _position = Offset.zero;
-        _edgeOverflow = 0.0;
-        // 切图后回到原尺寸，不再需要“放大暂停”标记
-        _zoomSuspended = false;
-      });
-    }
+    _resetViewTransform();
     final slideProvider = Provider.of<SlideProvider>(context, listen: false);
     slideProvider.prevImage(
       playOrder: slideProvider.followListOrder ? null : settings.playOrder,
@@ -893,6 +895,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// 当前是否处于放大状态
   bool get _isZoomed => _scale > 1.0 + _zoomEpsilon;
+
+  /// 切换图片前重置缩放/旋转/平移。
+  ///
+  /// 图片控件是复用的，若不重置，新图会带着上一张的放大倍数与位移显示。
+  /// 切换下一张、上一张以及删除当前图片后都需要调用。
+  void _resetViewTransform() {
+    if (_scale == _minScale) return;
+    setState(() {
+      _scale = _minScale;
+      _rotation = 0.0;
+      _position = Offset.zero;
+      _edgeOverflow = 0.0;
+      // 切图后回到原尺寸，不再需要“放大暂停”标记
+      _zoomSuspended = false;
+    });
+  }
 
   /// 手动旋转 + 方向自动旋转后的总旋转角（弧度）。
   double get _totalRotation => _rotation + _autoRotation;
@@ -1377,6 +1395,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   bool _hardwareKeyHandler(KeyEvent event) {
+    // 删除确认对话框打开时把按键交给对话框：方向键用于在「取消 / 确定」之间
+    // 移动焦点，若继续交给播放页会同时触发切换图片。
+    if (_isDeleteDialogOpen) return false;
+
+    // 按住 ↑/↓ 时系统会连续产生重复按键事件，用它实现持续放大/缩小。
+    // 其余按键（切图、播放、退出等）只在首次按下时响应，重复事件直接忽略。
+    if (event is KeyRepeatEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _zoomAt(_viewportCenter, _zoomStep);
+        return true;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _zoomAt(_viewportCenter, 1 / _zoomStep);
+        return true;
+      }
+      return false;
+    }
+
     if (event is KeyDownEvent) {
       final key = event.logicalKey;
       // Ctrl 组合键缩放：Ctrl + = / Ctrl + - / Ctrl + 0
@@ -1839,7 +1875,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       children: [
                         _buildTransitionAnimation(
                           Transform(
-                            key: ValueKey(slideProvider.currentIndex),
+                            // 按图片路径而不是索引做 key：后台补全播放列表后
+                            // 当前图片的索引会变（0 → 实际位置），若用索引做 key
+                            // 会让同一张图片重新播一次切换动画。
+                            key: ValueKey(currentItem.path),
                             alignment: Alignment.center,
                             // 顺序很重要：Matrix4 的方法是在右侧相乘，
                             // 因此 M = T · S。平移在最外层，_position 才是纯屏幕

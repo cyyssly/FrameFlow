@@ -421,11 +421,11 @@ class SlideProvider extends ChangeNotifier {
     switch (order) {
       case PlayOrder.sequential:
         // 按文件名排序（默认）——中文拼音 + 自然排序
-        _images.sort((a, b) => compareFileNames(a.name, b.name));
+        sortByFileName(_images, (image) => image.name);
         break;
       case PlayOrder.reverseSequential:
         // 按文件名逆序
-        _images.sort((a, b) => compareFileNames(b.name, a.name));
+        sortByFileName(_images, (image) => image.name, descending: true);
         break;
       case PlayOrder.newestFirst:
         // 按文件修改时间从新到旧

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -76,6 +77,7 @@ void main() {
   Future<SlideProvider> pumpPlayer(
     WidgetTester tester, {
     required int startIndex,
+    DeleteAction deleteAction = DeleteAction.exclude,
   }) async {
     final slide = SlideProvider();
     final settings = SettingsProvider();
@@ -83,6 +85,7 @@ void main() {
     settings.setStartFullscreen(false);
     settings.setAutoPlay(true);
     settings.setPresetInterval(60000);
+    settings.setDeleteAction(deleteAction);
     slide.setImages(images);
     slide.goToImage(startIndex);
     slide.startPlay();
@@ -104,6 +107,16 @@ void main() {
   Future<void> pressKey(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyEvent(key);
     await settleRealAsync(tester);
+  }
+
+  /// 当前图片的缩放倍数（取自包裹图片的 Transform 矩阵）。
+  ///
+  /// 播放页用「图片路径」作为 Transform 的 key（后台补全播放列表时索引会变），
+  /// 因此这里同样按当前图片的路径查找。
+  double imageScale(WidgetTester tester, SlideProvider slide) {
+    final key = ValueKey(slide.images[slide.currentIndex].path);
+    final transform = tester.widget<Transform>(find.byKey(key));
+    return transform.transform.storage[0];
   }
 
   testWidgets('返回上一张（目标是刚看过的、已缓存的图片）', (tester) async {
@@ -180,5 +193,93 @@ void main() {
     await gesture.up();
     await tester.pump();
     expect(slide.currentIndex, 1, reason: '松开左键后应切到下一张');
+  });
+
+  testWidgets('删除确认对话框打开时，方向键不应切换图片', (tester) async {
+    final slide = await pumpPlayer(
+      tester,
+      startIndex: 0,
+      deleteAction: DeleteAction.delete,
+    );
+    final l10n = AppLocalizations.of(tester.element(find.byType(PlayerScreen)));
+
+    // Del 弹出「确认删除」对话框（删除行为设为“实际删除”时才有确认）
+    await pressKey(tester, LogicalKeyboardKey.delete);
+    expect(find.byType(AlertDialog), findsOneWidget, reason: '应弹出删除确认框');
+
+    // 对话框打开期间按左右键：只应在按钮间移动焦点，不能切换图片
+    await pressKey(tester, LogicalKeyboardKey.arrowRight);
+    await pressKey(tester, LogicalKeyboardKey.arrowLeft);
+    expect(slide.currentIndex, 0, reason: '确认框打开时方向键不应切换图片');
+    expect(find.byType(AlertDialog), findsOneWidget, reason: '确认框应保持打开');
+
+    // 滚轮同样不能切换图片（对话框遮罩 + 切图入口的双重保证）
+    final mouse = TestPointer(7, PointerDeviceKind.mouse);
+    mouse.hover(const Offset(400, 300));
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, 120)));
+    await tester.pump();
+    mouse.hover(const Offset(400, 300));
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, -120)));
+    await tester.pump();
+    expect(slide.currentIndex, 0, reason: '确认框打开时滚轮不应切换图片');
+
+    // 取消后恢复播放，方向键重新生效
+    await tester.tap(find.text(l10n.cancel));
+    await settleRealAsync(tester);
+    // 对话框退场动画期间仍留在组件树上，等动画结束后再断言
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(AlertDialog), findsNothing);
+    await pressKey(tester, LogicalKeyboardKey.arrowRight);
+    expect(slide.currentIndex, 1);
+  });
+
+  testWidgets('放大状态下删除当前图片后，下一张应恢复原始大小', (tester) async {
+    final slide = await pumpPlayer(tester, startIndex: 0);
+    expect(imageScale(tester, slide), 1.0);
+
+    // ↑ 放大
+    await pressKey(tester, LogicalKeyboardKey.arrowUp);
+    expect(imageScale(tester, slide), greaterThan(1.0), reason: '应已进入放大状态');
+
+    // Del = 排除播放（无需确认），当前图片被移除，列表里的下一张顶到同一个位置
+    await pressKey(tester, LogicalKeyboardKey.delete);
+    expect(slide.images.length, 2);
+    expect(slide.currentIndex, 0);
+
+    expect(imageScale(tester, slide), 1.0, reason: '删除后新图不应继承上一张的放大状态');
+
+    // 跑完删除提示的 2 秒定时器，避免测试结束时仍有待处理的 Timer
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('按住 ↑ / ↓ 时应连续放大 / 缩小', (tester) async {
+    final slide = await pumpPlayer(tester, startIndex: 0);
+
+    // 首次按下
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+    await settleRealAsync(tester);
+    final afterFirst = imageScale(tester, slide);
+    expect(afterFirst, greaterThan(1.0));
+
+    // 按住不放：系统持续投递重复按键事件
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+    await settleRealAsync(tester);
+    final afterRepeat = imageScale(tester, slide);
+    expect(afterRepeat, greaterThan(afterFirst), reason: '按住 ↑ 应继续放大');
+
+    // 向下同样连续缩小
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await settleRealAsync(tester);
+    final afterZoomOut = imageScale(tester, slide);
+    expect(afterZoomOut, lessThan(afterRepeat), reason: '↓ 应缩小');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await settleRealAsync(tester);
+    expect(
+      imageScale(tester, slide),
+      lessThan(afterZoomOut),
+      reason: '按住 ↓ 应继续缩小',
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
   });
 }

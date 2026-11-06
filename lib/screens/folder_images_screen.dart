@@ -298,6 +298,9 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
           name: item.name,
           path: item.path,
           aspectRatio: ratio,
+          // 保留扫描阶段已读取的元数据，否则按时间/大小排序时又要重新读盘
+          modifiedAt: item.modifiedAt,
+          size: item.size,
         );
         // 更新全部列表
         final allIndex = allIndexByPath[item.path];
@@ -322,29 +325,39 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
 
   // ── 排序 ──
   /// 按当前排序方式排列 [_allItems]
+  ///
+  /// 全部采用「先取键、再按键排序」：比较回调内只查表，不做文件 I/O，
+  /// 也不重复转换文件名，几万张图排序也能瞬时完成。
   void _applySortToAllItems() {
     switch (_sortAction) {
       case _SortAction.nameAsc:
-        _allItems.sort((a, b) => compareFileNames(a.name, b.name));
+        sortByFileName(_allItems, (item) => item.name);
       case _SortAction.nameDesc:
-        _allItems.sort((a, b) => compareFileNames(b.name, a.name));
+        sortByFileName(_allItems, (item) => item.name, descending: true);
       case _SortAction.timeNewest:
-        _allItems.sort(
-          (a, b) => _modifiedTimeOf(b).compareTo(_modifiedTimeOf(a)),
-        );
+        final times = [for (final item in _allItems) _modifiedTimeOf(item)];
+        _sortIndexed(_allItems, (a, b) => times[b].compareTo(times[a]));
       case _SortAction.timeOldest:
-        _allItems.sort(
-          (a, b) => _modifiedTimeOf(a).compareTo(_modifiedTimeOf(b)),
-        );
+        final times = [for (final item in _allItems) _modifiedTimeOf(item)];
+        _sortIndexed(_allItems, (a, b) => times[a].compareTo(times[b]));
       case _SortAction.sizeLargest:
-        _allItems.sort((a, b) => _sizeOf(b).compareTo(_sizeOf(a)));
+        final sizes = [for (final item in _allItems) _sizeOf(item)];
+        _sortIndexed(_allItems, (a, b) => sizes[b].compareTo(sizes[a]));
       case _SortAction.sizeSmallest:
-        _allItems.sort((a, b) => _sizeOf(a).compareTo(_sizeOf(b)));
+        final sizes = [for (final item in _allItems) _sizeOf(item)];
+        _sortIndexed(_allItems, (a, b) => sizes[a].compareTo(sizes[b]));
       case _SortAction.random:
         _allItems.shuffle();
       case _SortAction.newPreferred:
         SlideProvider.applyNewPreferredOrder(_allItems);
     }
+  }
+
+  /// 按索引比较结果重排 [items]，比较回调内不再访问列表元素
+  void _sortIndexed(List<ImageItem> items, int Function(int a, int b) compare) {
+    final order = List<int>.generate(items.length, (i) => i)..sort(compare);
+    final sorted = [for (final index in order) items[index]];
+    items.setAll(0, sorted);
   }
 
   /// 读取文件大小；远端图片自带大小，本地图片回退到 File.lengthSync
@@ -358,8 +371,11 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     }
   }
 
-  /// 读取文件修改时间；读取失败时按最早处理，保证排序结果稳定
+  /// 读取文件修改时间：优先使用扫描时已读取的元数据，缺失时才读盘；
+  /// 读取失败时按最早处理，保证排序结果稳定
   DateTime _modifiedTimeOf(ImageItem item) {
+    final known = item.modifiedAt;
+    if (known != null) return known;
     try {
       return File(item.path).lastModifiedSync();
     } catch (_) {

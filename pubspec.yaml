@@ -1,7 +1,7 @@
 name: frame_flow
 description: "A cross-platform image slideshow application."
 publish_to: 'none'
-version: 1.5.7+12
+version: 1.5.8+13
 
 environment:
   sdk: ^3.12.2
@@ -16,6 +16,9 @@ dependencies:
   # 修复了 Windows 上主线程 CoUninitialize 导致的原生崩溃（comdlg32.dll 0xc0000005）。
   # 注意：10.1.1+ 起 Android 实现迁移到 Kotlin，与 AGP 9 存在兼容问题，暂不升级到 10.x。
   file_picker: ^9.0.3
+  # Windows 端自绘 IFileOpenDialog 实现目录多选（file_picker 只支持单选），
+  # 在此之前它只是 file_picker 的传递依赖。
+  win32: ^5.15.0
   # 固定版本：2.5.6 起依赖的 shared_preferences_android 2.5.1 迁移到 JNI，
   # 在 Flutter 3.44.8 的 release 包中启动即报 NoSuchMethodError（表现为白屏）。
   shared_preferences: 2.5.5

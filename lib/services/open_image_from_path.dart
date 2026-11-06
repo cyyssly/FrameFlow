@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
+import 'package:frame_flow/services/explorer_sort_service.dart';
 import 'package:frame_flow/services/image_scan_service.dart';
 
 /// 文件直开：根据图片路径构建播放列表并跳转到播放页。
@@ -11,65 +13,32 @@ import 'package:frame_flow/services/image_scan_service.dart';
 /// 核心思路：
 /// 1. 取图片的直接父目录
 /// 2. 扫描该目录（**不包含子文件夹**），排除记录仍然生效
-/// 3. 播放列表按该文件夹记录的排序方式排列；没有记录时跟随设置页的默认播放顺序
+/// 3. 播放列表按资源管理器当前视图的排序方式排列（名称/修改日期/大小及方向），
+///    保证幻灯播放顺序与用户肉眼在资源管理器里看到的顺序一致；
+///    读不到（目录未在资源管理器打开、按类型排序等）时回退到名称自然序
 /// 4. 定位到用户打开的那张图片，但**不自动播放**，等用户点击播放按钮
 class OpenImageFromPath {
-  /// 把 [SettingsProvider.localSortFor] 返回的排序名字符串（来自
-  /// `folder_images_screen.dart` 内部枚举 `_SortAction` 的 `.name`）
-  /// 反查为 [PlayOrder]；未知或 null 时回退到 [fallback]（通常是
-  /// [SettingsProvider.playOrder]）。
-  static PlayOrder playOrderForSortName(
-    String? sortName, {
-    required PlayOrder fallback,
-  }) {
-    if (sortName == null) return fallback;
-    switch (sortName) {
-      case 'nameAsc':
-        return PlayOrder.sequential;
-      case 'nameDesc':
-        return PlayOrder.reverseSequential;
-      case 'timeNewest':
-        return PlayOrder.newestFirst;
-      case 'timeOldest':
-        return PlayOrder.oldestFirst;
-      case 'sizeLargest':
-        return PlayOrder.sizeLargest;
-      case 'sizeSmallest':
-        return PlayOrder.sizeSmallest;
-      case 'random':
-        return PlayOrder.random;
-      case 'newPreferred':
-        return PlayOrder.newPreferred;
-      default:
-        return fallback;
-    }
-  }
-
   /// Windows 下做大小写不敏感的路径精确匹配。
   static bool _pathEquals(String a, String b) {
     return Platform.isWindows ? a.toLowerCase() == b.toLowerCase() : a == b;
   }
 
-  /// 扫描图片所在的父目录，并返回「图片列表」与「应使用的排序方式」。
-  static Future<(List<ImageItem>, PlayOrder)> scanWithOrder(
+  /// 扫描图片所在的父目录，返回该文件夹内的全部图片。
+  ///
+  /// 只扫描当前文件夹，不递归子文件夹。
+  static Future<List<ImageItem>> scanFolderOf(
     String imagePath,
     SettingsProvider settings,
-  ) async {
+  ) {
     final parentDir = File(imagePath).parent.path;
-    // 只扫描当前文件夹，不递归子文件夹
-    final items = await ImageScanService.scanFolder(
+    return ImageScanService.scanFolder(
       parentDir,
       settings,
       recursiveOverride: false,
     );
-    final order = playOrderForSortName(
-      settings.localSortFor(parentDir),
-      fallback: settings.playOrder,
-    );
-    return (items, order);
   }
 
-  /// 打开图片：构建播放列表，定位到入口图片，导航到播放页。
+  /// 打开图片：先立即进入播放页显示被打开的图片，再在后台补全播放列表。
   ///
   /// - [popFirst] 跳转前是否先 pop 到根路由。单实例转发场景需要清掉
   ///   当前可能残留的播放页；新实例首次启动不需要。
@@ -86,32 +55,43 @@ class OpenImageFromPath {
       slideProvider.setFolderPaths(settings.lastFolderPaths);
     }
 
-    final (items, order) = await scanWithOrder(imagePath, settings);
+    // 先用被打开的图片直接进入播放页。同目录扫描在几万张照片的文件夹里
+    // 要花数秒，若等扫描结束再跳转，用户会先盯着上一个界面等，
+    // 表现为「双击后迟迟不切到新图片」。
+    slideProvider.setImages([
+      ImageItem(
+        name: imagePath.split(Platform.pathSeparator).last,
+        path: imagePath,
+      ),
+    ]);
 
     if (popFirst && navigator.mounted) {
       navigator.popUntil((route) => route.isFirst);
     }
+    if (!navigator.mounted) return;
+    // 不自动播放：打开后停在目标图片，由用户点击播放按钮开始
+    unawaited(navigator.pushNamed('/player'));
 
-    if (items.isEmpty) {
-      // 扫描不到同目录图片（目录不可读等）时，至少播放被打开的这一张
-      slideProvider.setImages([
-        ImageItem(
-          name: imagePath.split(Platform.pathSeparator).last,
-          path: imagePath,
-        ),
-      ]);
-    } else {
-      slideProvider.setImages(items);
-      slideProvider.sortByPlayOrder(order);
-      final idx = slideProvider.images.indexWhere(
-        (image) => _pathEquals(image.path, imagePath),
-      );
-      slideProvider.goToImage(idx >= 0 ? idx : 0);
-    }
-    // 不调用 startPlay：打开后停在目标图片，由用户点击播放按钮开始
+    // 后台补全同目录的播放列表，完成后原地替换（显示中的图片不变）
+    final items = await scanFolderOf(imagePath, settings);
+    if (items.isEmpty || !navigator.mounted) return;
 
-    if (navigator.mounted) {
-      navigator.pushNamed('/player');
+    // 与用户在资源管理器里看到的顺序保持一致：读取该目录窗口当前的排序列与方向
+    final playOrder =
+        await ExplorerSortService.readPlayOrder(File(imagePath).parent.path) ??
+        PlayOrder.sequential;
+
+    // 扫描期间用户可能已经关掉播放页、或换了别的图片，此时不要覆盖当前列表
+    if (slideProvider.images.length != 1 ||
+        !_pathEquals(slideProvider.images.first.path, imagePath)) {
+      return;
     }
+
+    slideProvider.setImages(items);
+    slideProvider.sortByPlayOrder(playOrder);
+    final idx = slideProvider.images.indexWhere(
+      (image) => _pathEquals(image.path, imagePath),
+    );
+    slideProvider.goToImage(idx >= 0 ? idx : 0);
   }
 }

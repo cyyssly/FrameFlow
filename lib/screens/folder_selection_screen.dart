@@ -232,9 +232,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
         }
       }
     } else {
-      // 桌面端使用原生目录选择对话框（带互斥保护，避免重复弹窗导致原生崩溃）
-      final result = await DirectoryPickerService.pickDirectory();
-      if (result != null) {
+      // 桌面端使用原生目录选择对话框，支持一次选择多个文件夹
+      //（带互斥保护，避免重复弹窗导致原生崩溃）
+      final results = await DirectoryPickerService.pickDirectories();
+      if (results.isNotEmpty) {
         if (!mounted) return;
         final slideProvider = Provider.of<SlideProvider>(
           context,
@@ -244,11 +245,15 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
           context,
           listen: false,
         );
-        slideProvider.addFolderPath(result);
+        for (final path in results) {
+          slideProvider.addFolderPath(path);
+        }
         settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
 
         // 计算新添加文件夹的统计信息
-        _countFolderImages(result);
+        for (final path in results) {
+          _countFolderImages(path);
+        }
       }
     }
   }
@@ -1368,8 +1373,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
           // 每收集到10张新图片就更新一次列表（播放中）
           if (hasStartedPlaying &&
               uniqueImages.length - lastUpdateCount >= 10) {
-            final newImages = uniqueImages.values.toList()
-              ..sort((a, b) => compareFileNames(a.name, b.name));
+            final newImages = uniqueImages.values.toList();
+            sortByFileName(newImages, (image) => image.name);
             slideProvider.setImages(newImages);
             lastUpdateCount = uniqueImages.length;
           }
@@ -1411,8 +1416,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       }
 
       // 按文件名排序
-      final sortedImages = uniqueImages.values.toList()
-        ..sort((a, b) => compareFileNames(a.name, b.name));
+      final sortedImages = uniqueImages.values.toList();
+      sortByFileName(sortedImages, (image) => image.name);
 
       if (sortedImages.isEmpty) {
         if (!mounted) return;
@@ -1467,8 +1472,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     SettingsProvider settingsProvider,
   ) async {
     // 对已收集的图片进行排序
-    final sortedImages = images.toList()
-      ..sort((a, b) => compareFileNames(a.name, b.name));
+    final sortedImages = images.toList();
+    sortByFileName(sortedImages, (image) => image.name);
 
     slideProvider.setImages(sortedImages);
     settingsProvider.setLastFolderPaths(slideProvider.folderPaths);
