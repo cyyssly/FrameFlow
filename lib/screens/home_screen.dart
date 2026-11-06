@@ -10,6 +10,7 @@ import 'package:frame_flow/screens/help_screen.dart';
 import 'package:frame_flow/screens/lan_devices_screen.dart';
 import 'package:frame_flow/screens/player_screen.dart';
 import 'package:frame_flow/services/image_scan_service.dart';
+import 'package:frame_flow/services/open_image_from_path.dart';
 import 'package:frame_flow/utils/filename_compare.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
@@ -40,7 +41,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// 直接播放命令行传入的图片（只播放该文件，不扫描其所在目录）。
+  /// 直接打开命令行传入的图片：播放列表为图片所在文件夹（不递归子文件夹），
+  /// 排序跟随该文件夹记录，否则用设置页默认顺序；打开后不自动播放。
   void _openInitialImage() {
     final path = widget.initialImagePath;
     if (!mounted || path == null) return;
@@ -49,16 +51,12 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       listen: false,
     );
-    // 打开的图片若属于某个媒体库，先切到该库，让界面与播放内容一致；
-    // 不在任何库内则保持当前库不变。
-    if (settingsProvider.switchToLibraryForPath(path)) {
-      slideProvider.setFolderPaths(settingsProvider.lastFolderPaths);
-    }
-    slideProvider.setImages([
-      ImageItem(name: path.split(Platform.pathSeparator).last, path: path),
-    ]);
-    slideProvider.startPlay();
-    Navigator.pushNamed(context, '/player');
+    OpenImageFromPath.openImage(
+      navigator: Navigator.of(context),
+      slideProvider: slideProvider,
+      settings: settingsProvider,
+      imagePath: path,
+    );
   }
 
   Future<void> _autoPlayOnStartup() async {

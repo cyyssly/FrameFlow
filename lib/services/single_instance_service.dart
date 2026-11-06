@@ -2,10 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/providers/slide_provider.dart';
 import 'package:frame_flow/services/image_formats.dart';
+import 'package:frame_flow/services/open_image_from_path.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// Windows 单实例支持：第二个实例会把图片路径转发给已运行的实例。
@@ -106,17 +106,12 @@ class SingleInstanceService {
     }
     if (!navigator.mounted) return;
 
-    // 关掉当前播放页（以及可能存在的弹层），再播放新图片
-    navigator.popUntil((route) => route.isFirst);
-    // 打开的图片若属于某个媒体库，先切到该库，让界面与播放内容一致；
-    // 不在任何库内则保持当前库不变。
-    if (settings.switchToLibraryForPath(path)) {
-      slide.setFolderPaths(settings.lastFolderPaths);
-    }
-    slide.setImages([
-      ImageItem(name: path.split(Platform.pathSeparator).last, path: path),
-    ]);
-    slide.startPlay();
-    navigator.pushNamed('/player');
+    await OpenImageFromPath.openImage(
+      navigator: navigator,
+      slideProvider: slide,
+      settings: settings,
+      imagePath: path,
+      popFirst: true,
+    );
   }
 }

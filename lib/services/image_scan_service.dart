@@ -13,10 +13,14 @@ class ImageScanService {
   /// 扫描结果会剔除 [SettingsProvider.excludedPaths] 中记录的图片：
   /// 排除操作只是把路径记进设置，若不在扫描时过滤，退出页面重新进入后
   /// 被排除的图片会再次出现。
+  ///
+  /// [recursiveOverride] 用于覆盖设置中的「包含子文件夹」：传入 `false`
+  /// 强制只扫描当前目录，`null` 表示跟随设置。
   static Future<List<ImageItem>> scanFolder(
     String folderPath,
-    SettingsProvider settings,
-  ) async {
+    SettingsProvider settings, {
+    bool? recursiveOverride,
+  }) async {
     // Windows 文件路径不区分大小写，统一转小写比较，避免因大小写差异漏过滤
     final excluded = {
       for (final path in settings.excludedPaths)
@@ -38,7 +42,7 @@ class ImageScanService {
     // 桌面端使用文件系统 API
     List<File> files = [];
     final dir = Directory(folderPath);
-    if (settings.recursiveScan) {
+    if (recursiveOverride ?? settings.recursiveScan) {
       await for (var entity in dir.list(recursive: true)) {
         if (entity is File) {
           files.add(entity);
