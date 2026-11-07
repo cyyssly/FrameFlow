@@ -24,6 +24,23 @@ class SlideProvider extends ChangeNotifier {
   String get folderPath => _folderPaths.isNotEmpty ? _folderPaths.first : '';
   List<String> get folderPaths => _folderPaths;
 
+  /// 启动扫描是否进行中。
+  ///
+  /// 开启「自动播放」时应用会立即进入播放页，此时播放列表还是空的，
+  /// 播放页据此在中央显示扫描提示，而不是「没有图片」。
+  bool get isScanning => _isScanning;
+  String get scanStatusText => _scanStatusText;
+
+  bool _isScanning = false;
+  String _scanStatusText = '';
+
+  void setScanning(bool scanning, {String statusText = ''}) {
+    if (_isScanning == scanning && _scanStatusText == statusText) return;
+    _isScanning = scanning;
+    _scanStatusText = statusText;
+    notifyListeners();
+  }
+
   void setImages(
     List<ImageItem> images, {
     PlayOrder? playOrder,

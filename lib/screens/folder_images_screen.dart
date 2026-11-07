@@ -167,6 +167,13 @@ class _FolderImagesScreenState extends State<FolderImagesScreen> {
     if (event is! KeyDownEvent) return false;
     if (ModalRoute.of(context)?.isCurrent != true) return false;
     final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      // 加载（扫描）期间或暂无可播放图片时，重复按 Enter 直接忽略
+      if (_isLoading || _items.isEmpty) return true;
+      _startPlaybackFrom(0);
+      return true;
+    }
     if (key == LogicalKeyboardKey.f11) {
       _toggleFullscreen();
       return true;

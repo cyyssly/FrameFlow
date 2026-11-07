@@ -39,44 +39,21 @@ class ImageScanService {
           .toList();
     }
 
-    // 桌面端使用文件系统 API
-    List<File> files = [];
-    final dir = Directory(folderPath);
-    if (recursiveOverride ?? settings.recursiveScan) {
-      await for (var entity in dir.list(recursive: true)) {
-        if (entity is File) {
-          files.add(entity);
-        }
-      }
-    } else {
-      final entities = await dir.list().toList();
-      files = entities.whereType<File>().toList();
-    }
-
-    final items = <ImageItem>[];
-    for (final file in files) {
-      if (!isSupportedImagePath(file.path)) continue;
-      // 文件大小与修改时间在此读入，避免瀑布流卡片在 build 里同步读盘
-      DateTime? modifiedAt;
-      int? size;
-      try {
-        final stat = await file.stat();
-        modifiedAt = stat.modified;
-        size = stat.size;
-      } catch (_) {
-        // 文件被占用/权限不足时忽略，对应信息显示为「未知」
-      }
-      items.add(
-        ImageItem(
-          name: file.path.split(Platform.pathSeparator).last,
-          path: file.path,
-          modifiedAt: modifiedAt,
-          size: size,
-        ),
-      );
-    }
-
-    return items.where(notExcluded).toList();
+    // 桌面端使用文件系统 API。
+    //
+    // 列目录与读取元数据全部放进后台 isolate 并用同步 API 执行：
+    // 原先在主 isolate 里对每个文件 `await file.stat()`，数万张图会产生
+    // 上万个串行的异步系统调用，启动扫描要花好几秒且与 UI 争抢主线程。
+    final items = await compute(
+      _scanFolderSync,
+      _ScanFolderRequest(
+        folderPath: folderPath,
+        recursive: recursiveOverride ?? settings.recursiveScan,
+        excludedPaths: excluded,
+        lowerCasePaths: Platform.isWindows,
+      ),
+    );
+    return items;
   }
 
   /// 解析宽高比时最多读取的文件头字节数。
@@ -205,4 +182,68 @@ class ImageScanService {
     if (width <= 0 || height <= 0) return null;
     return width / height;
   }
+}
+
+/// 后台扫描请求（[compute] 的参数需要可跨 isolate 传递）。
+class _ScanFolderRequest {
+  final String folderPath;
+  final bool recursive;
+
+  /// 已按平台大小写规则归一化后的排除路径
+  final Set<String> excludedPaths;
+
+  /// 是否按小写比较路径（Windows 文件路径不区分大小写）
+  final bool lowerCasePaths;
+
+  const _ScanFolderRequest({
+    required this.folderPath,
+    required this.recursive,
+    required this.excludedPaths,
+    required this.lowerCasePaths,
+  });
+}
+
+/// 后台 isolate 入口：同步列目录并读取每个文件的元数据。
+///
+/// 使用同步 API 是为了避免数万次 `await` 的调度开销；整个函数运行在
+/// 后台 isolate 中，不会阻塞 UI。
+List<ImageItem> _scanFolderSync(_ScanFolderRequest request) {
+  final files = <File>[];
+  final dir = Directory(request.folderPath);
+  if (request.recursive) {
+    for (final entity in dir.listSync(recursive: true, followLinks: false)) {
+      if (entity is File) files.add(entity);
+    }
+  } else {
+    for (final entity in dir.listSync()) {
+      if (entity is File) files.add(entity);
+    }
+  }
+
+  final items = <ImageItem>[];
+  for (final file in files) {
+    final path = file.path;
+    if (!isSupportedImagePath(path)) continue;
+    final comparable = request.lowerCasePaths ? path.toLowerCase() : path;
+    if (request.excludedPaths.contains(comparable)) continue;
+    // 文件大小与修改时间在此读入，避免瀑布流卡片在 build 里同步读盘
+    DateTime? modifiedAt;
+    int? size;
+    try {
+      final stat = file.statSync();
+      modifiedAt = stat.modified;
+      size = stat.size;
+    } catch (_) {
+      // 文件被占用/权限不足时忽略，对应信息显示为「未知」
+    }
+    items.add(
+      ImageItem(
+        name: path.split(Platform.pathSeparator).last,
+        path: path,
+        modifiedAt: modifiedAt,
+        size: size,
+      ),
+    );
+  }
+  return items;
 }

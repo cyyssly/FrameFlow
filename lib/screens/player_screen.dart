@@ -1777,10 +1777,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _applySettingsToPlayback(settings);
 
         if (slideProvider.images.isEmpty) {
+          // 开启「自动播放」时应用会先进播放页再扫描：播放列表为空且扫描
+          // 进行中时，在屏幕中央醒目提示，避免用户以为是空白/卡死。
+          final loc = AppLocalizations.of(context);
           return Scaffold(
             backgroundColor: settings.background,
-            body: Center(child: Text(AppLocalizations.of(context).noImages)),
+            body: Center(
+              child: slideProvider.isScanning
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 64,
+                          height: 64,
+                          child: CircularProgressIndicator(strokeWidth: 6),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          slideProvider.scanStatusText.isEmpty
+                              ? loc.scanning
+                              : slideProvider.scanStatusText,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            color: Colors.white,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    )
+                  : Text(loc.noImages),
+            ),
           );
+        }
+
+        // 启动扫描时播放列表为空，图片是扫描完成后才写入的：
+        // 此时 initState 里启动的自动播放计时器并不存在，这里补启动一次，
+        // 否则首张图片会一直停住。
+        if (slideProvider.isPlaying && _autoPlayTimer == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _startAutoPlay();
+          });
         }
 
         // 图片索引变化时更新方向旋转
