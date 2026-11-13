@@ -617,26 +617,27 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
     unawaited(MasonryImageGrid.precacheItems(items, context, concurrency: 4));
   }
 
-  /// 同一批次的文件名去重，避免多张同名图片互相覆盖
-  String _uniqueBatchName(Set<String> used, String name) {
-    if (used.add(name)) return name;
-    final dot = name.lastIndexOf('.');
-    final base = dot > 0 ? name.substring(0, dot) : name;
-    final ext = dot > 0 ? name.substring(dot) : '';
-    var index = 1;
-    while (true) {
-      final candidate = '${base}_$index$ext';
-      if (used.add(candidate)) return candidate;
-      index++;
-    }
-  }
-
   /// 把远端图片复制到本机选定的目录
   Future<void> _copyImage(ImageItem item) async {
     final loc = AppLocalizations.of(context);
     final destination = await CopyService.resolveDestination(context);
     if (destination == null || !mounted) return;
-    final ok = await CopyService.copyRemoteImage(item, destination);
+    final name = CopyService.fileNameFor(item);
+    final existing = await MediaStoreService.existingNames(destination, {name});
+    if (!mounted) return;
+    final plan = await CopyService.resolveConflicts(
+      context,
+      title: loc.copyTo,
+      names: [name],
+      existing: existing,
+      batch: false,
+    );
+    if (!mounted || plan.cancelled || plan.skip.contains(name)) return;
+    final ok = await CopyService.copyRemoteImage(
+      item,
+      destination,
+      overwrite: plan.replace.contains(name),
+    );
     if (!mounted) return;
     _showSnack(ok ? loc.copySuccess : loc.copyFailed);
   }
@@ -693,6 +694,24 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
         return;
       }
 
+      // 先统计目标目录中的同名文件，由用户决定替换还是跳过
+      final names = [
+        for (var i = 0; i < all.length; i++) _fileNameFor(all[i], i),
+      ];
+      final existing = await MediaStoreService.existingNames(
+        destination,
+        names.toSet(),
+      );
+      if (!mounted) return;
+      final plan = await CopyService.resolveConflicts(
+        context,
+        title: loc.copyTo,
+        names: names,
+        existing: existing,
+        batch: true,
+      );
+      if (!mounted || plan.cancelled) return;
+
       var cancelled = false;
       final progress = ValueNotifier<(int, int)>((0, all.length));
       unawaited(
@@ -736,11 +755,16 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
         const batchSize = 50;
         Directory? tempDir;
         var batchPaths = <String>[];
-        final usedNames = <String>{};
+        var batchNames = <String>[];
 
         Future<void> flushBatch() async {
           if (batchPaths.isEmpty) return;
-          if (!await MediaStoreService.copyFiles(destination, batchPaths)) {
+          if (!await MediaStoreService.copyFiles(
+            destination,
+            batchPaths,
+            displayNames: batchNames,
+            overwriteNames: plan.replace,
+          )) {
             failed += batchPaths.length;
           }
           for (final path in batchPaths) {
@@ -749,6 +773,7 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
             } catch (_) {}
           }
           batchPaths = [];
+          batchNames = [];
         }
 
         try {
@@ -760,6 +785,11 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
           for (var i = 0; i < all.length; i++) {
             if (cancelled) break;
             final item = all[i];
+            final name = names[i];
+            if (plan.skip.contains(name)) {
+              progress.value = (i + 1, all.length);
+              continue;
+            }
             final url = item.remoteUrl;
             final bytes = url == null
                 ? null
@@ -767,12 +797,13 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
             if (bytes == null) {
               failed++;
             } else {
-              final name = _uniqueBatchName(usedNames, _fileNameFor(item, i));
+              // 临时文件名加序号，保证批内唯一；写入目标时再还原为原文件名
               final file = File(
-                '${tempDir.path}${Platform.pathSeparator}$name',
+                '${tempDir.path}${Platform.pathSeparator}${i}_$name',
               );
               await file.writeAsBytes(bytes, flush: true);
               batchPaths.add(file.path);
+              batchNames.add(name);
               if (batchPaths.length >= batchSize) await flushBatch();
             }
             progress.value = (i + 1, all.length);
@@ -789,6 +820,11 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
         for (var i = 0; i < all.length; i++) {
           if (cancelled) break;
           final item = all[i];
+          final name = names[i];
+          if (plan.skip.contains(name)) {
+            progress.value = (i + 1, all.length);
+            continue;
+          }
           final url = item.remoteUrl;
           try {
             final bytes = url == null
@@ -797,10 +833,7 @@ class _RemoteImagesScreenState extends State<RemoteImagesScreen> {
             if (bytes == null) {
               failed++;
             } else {
-              final target = await CopyService.uniqueDesktopTarget(
-                destination,
-                _fileNameFor(item, i),
-              );
+              final target = '$destination${Platform.pathSeparator}$name';
               await File(target).writeAsBytes(bytes, flush: true);
             }
           } catch (_) {

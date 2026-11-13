@@ -46,6 +46,24 @@ class _FolderCache {
   const _FolderCache(this.images, this.timestamp);
 }
 
+/// 对外暴露的共享文件夹条目。
+///
+/// 桌面端一个路径即一个条目；手机端的同名相册（仅大小写不同也算同名）
+/// 合并为一个条目，远端设备的列表、浏览、播放与共享都以条目为单位。
+class _SharedFolder {
+  /// 远端客户端使用的文件夹标识，沿用组内第一个路径的 hash，
+  /// 这样升级前已保存的共享引用仍能解析
+  final String id;
+
+  /// 展示名称，沿用组内第一个路径的真实写法
+  final String name;
+
+  /// 该条目包含的目录，至少一个
+  final List<String> paths;
+
+  const _SharedFolder(this.id, this.name, this.paths);
+}
+
 /// 排序后的图片列表缓存（按排序参数区分）
 ///
 /// 按时间/大小排序需要先读取全部文件的 stat，代价较高；
@@ -91,6 +109,14 @@ class LanServerService {
 
   /// 已读取过的图片宽高比缓存，避免分页时重复读取同一批文件头
   final Map<String, double?> _aspectCache = {};
+
+  /// 条目内「图片标识 -> 本机绝对路径」的映射，键为条目签名。
+  ///
+  /// 标识必须按真实扫描来源生成，不能靠比较路径前缀：
+  /// Android 上 MediaStore 返回的文件路径与相册路径未必是同一写法
+  /// （例如 `/sdcard` 与 `/storage/emulated/0`），前缀匹配会整体失效，
+  /// 合并条目里的图片就会被错误归到第一个目录，导致原图与缩略图都读不到。
+  final Map<String, Map<String, String>> _idPathCache = {};
 
   bool get isRunning => _server != null;
 
@@ -140,6 +166,7 @@ class LanServerService {
     _server = null;
     _folderCache.clear();
     _aspectCache.clear();
+    _idPathCache.clear();
     await server?.close(force: true);
   }
 
@@ -188,7 +215,7 @@ class LanServerService {
       'id': _deviceId,
       'name': _deviceName,
       'port': _port,
-      'folders': _folderPaths?.call().length ?? 0,
+      'folders': _sharedFolders().length,
       'platform': Platform.operatingSystem,
       // 允许远端执行的操作，客户端据此决定按钮是否显示
       'rx': _remoteExcludeEnabled?.call() ?? false,
@@ -196,14 +223,99 @@ class LanServerService {
     };
   }
 
-  Future<List<Map<String, Object?>>> _foldersJson() async {
+  /// 当前对外暴露的共享文件夹条目。
+  ///
+  /// 手机端把同名相册（仅大小写不同也算同名）合并成一个条目，
+  /// 与本地「选择文件夹」页的展示规则保持一致；桌面端一个路径一个条目。
+  List<_SharedFolder> _sharedFolders() {
     final paths = _folderPaths?.call() ?? const <String>[];
-    final result = <Map<String, Object?>>[];
+    if (!Platform.isAndroid) {
+      return [
+        for (final path in paths)
+          _SharedFolder(folderIdFor(path), _folderName(path), [path]),
+      ];
+    }
+    final groups = <String, List<String>>{};
     for (final path in paths) {
-      final images = await _imagesForPath(path);
+      // 相册名不区分大小写，避免 Camera 与 camera 被拆成两个条目
+      groups.putIfAbsent(_folderName(path).toLowerCase(), () => []).add(path);
+    }
+    return [
+      for (final group in groups.values)
+        _SharedFolder(
+          // 标识沿用组内第一个路径，兼容升级前已保存的共享引用
+          folderIdFor(group.first),
+          _folderName(group.first),
+          group,
+        ),
+    ];
+  }
+
+  /// 按标识查找共享条目。
+  ///
+  /// 兼容升级前的旧标识：远端保存的引用可能指向组内非首个同名路径。
+  _SharedFolder? _folderById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    final folders = _sharedFolders();
+    for (final folder in folders) {
+      if (folder.id == id) return folder;
+    }
+    for (final folder in folders) {
+      for (final path in folder.paths) {
+        if (folderIdFor(path) == id) return folder;
+      }
+    }
+    return null;
+  }
+
+  /// 条目内所有目录的图片；合并了多个同名相册时按完整路径去重
+  Future<List<ImageItem>> _imagesForFolder(_SharedFolder folder) async {
+    if (folder.paths.length == 1) return _imagesForPath(folder.paths.first);
+    final seen = <String>{};
+    final result = <ImageItem>[];
+    for (final path in folder.paths) {
+      for (final item in await _imagesForPath(path)) {
+        if (seen.add(item.path)) result.add(item);
+      }
+    }
+    return result;
+  }
+
+  /// 条目内「图片标识 -> 绝对路径」映射，按最近一次扫描结果生成。
+  ///
+  /// 标识里的目录序号直接来自图片所属的共享目录，而不是比较路径前缀，
+  /// 因此无论 MediaStore 返回的路径写法是否与相册路径一致，
+  /// 列表接口给出的标识都能被原图/缩略图接口解析回同一张图片。
+  Future<Map<String, String>> _idsForFolder(_SharedFolder folder) async {
+    final signature = _folderSignature(folder);
+    final cached = _idPathCache[signature];
+    if (cached != null) return cached;
+
+    final result = <String, String>{};
+    for (var i = 0; i < folder.paths.length; i++) {
+      final root = folder.paths[i];
+      for (final item in await _imagesForPath(root)) {
+        final relative = _relativeTo(root, item.path);
+        if (relative.isEmpty) continue;
+        result[folder.paths.length == 1 ? relative : '$i:$relative'] =
+            item.path;
+      }
+    }
+    _idPathCache[signature] = result;
+    return result;
+  }
+
+  /// 条目签名：参与标识分配的因素（标识与包含的目录）变化时需要重建映射
+  static String _folderSignature(_SharedFolder folder) =>
+      '${folder.id}|${folder.paths.join('|')}';
+
+  Future<List<Map<String, Object?>>> _foldersJson() async {
+    final result = <Map<String, Object?>>[];
+    for (final folder in _sharedFolders()) {
+      final images = await _imagesForFolder(folder);
       result.add({
-        'id': folderIdFor(path),
-        'name': _folderName(path),
+        'id': folder.id,
+        'name': folder.name,
         'count': images.length,
       });
     }
@@ -217,8 +329,9 @@ class LanServerService {
       return cached.images;
     }
     final images = await _scanFolder(folder);
-    // 目录内容变化后，旧的排序结果不再有效
+    // 目录内容变化后，旧的排序与标识结果不再有效
     _sortCache.removeWhere((key, _) => key.startsWith('$folder|'));
+    _idPathCache.clear();
     _folderCache[folder] = _FolderCache(images, DateTime.now());
     return images;
   }
@@ -270,17 +383,20 @@ class LanServerService {
   /// 不传 `sort` 时保持目录扫描的默认顺序，兼容旧客户端。
   /// 随机排序用 `seed` 保证同一次浏览的各页顺序一致。
   Future<_SortedCache> _imagesForServe(
-    String root, {
+    _SharedFolder folder, {
     String? sort,
     required String order,
     required String seed,
   }) async {
-    final images = await _imagesForPath(root);
+    final images = await _imagesForFolder(folder);
     if (sort == null || sort.isEmpty) {
       return _SortedCache(images, const {}, DateTime.now());
     }
 
-    final key = '$root|$sort|$order|$seed';
+    // 单目录条目沿用目录路径作缓存键，合并条目用条目标识
+    final key =
+        '${folder.paths.length == 1 ? folder.paths.first : folder.id}'
+        '|$sort|$order|$seed';
     final cached = _sortCache[key];
     if (cached != null) {
       if (DateTime.now().difference(cached.timestamp) < _scanCacheDuration) {
@@ -343,8 +459,8 @@ class LanServerService {
   }
 
   Future<void> _serveImages(Uri uri, HttpResponse response) async {
-    final root = _folderById(uri.queryParameters['folder']);
-    if (root == null) {
+    final folder = _folderById(uri.queryParameters['folder']);
+    if (folder == null) {
       response.statusCode = HttpStatus.notFound;
       response.write('Folder Not Found');
       await response.close();
@@ -357,7 +473,7 @@ class LanServerService {
         .clamp(1, 500);
 
     final serve = await _imagesForServe(
-      root,
+      folder,
       sort: uri.queryParameters['sort'],
       order: uri.queryParameters['order'] == 'desc' ? 'desc' : 'asc',
       seed: uri.queryParameters['seed'] ?? '',
@@ -404,12 +520,18 @@ class LanServerService {
             }),
           );
 
+    // 标识按图片实际所属目录生成，原图/缩略图接口据此还原真实路径
+    final idByPath = <String, String>{};
+    for (final entry in (await _idsForFolder(folder)).entries) {
+      idByPath[entry.value] = entry.key;
+    }
+
     final itemsJson = <Map<String, Object?>>[];
     for (var i = 0; i < page.length; i++) {
       final item = page[i];
       final stat = stats[i];
       itemsJson.add({
-        'id': _relativeTo(root, item.path),
+        'id': idByPath[item.path] ?? _idWithin(folder, item.path),
         'name': item.name,
         'size': stat?.size,
         'mtime': stat?.modified.millisecondsSinceEpoch,
@@ -429,13 +551,16 @@ class LanServerService {
     Uri uri,
     HttpResponse response,
   ) async {
-    final root = _folderById(uri.queryParameters['folder']);
-    if (root == null) {
+    final folder = _folderById(uri.queryParameters['folder']);
+    if (folder == null) {
       response.statusCode = HttpStatus.notFound;
       await response.close();
       return;
     }
-    final fullPath = _resolveWithin(root, uri.queryParameters['id'] ?? '');
+    final fullPath = await _resolveImage(
+      folder,
+      uri.queryParameters['id'] ?? '',
+    );
     if (fullPath == null) {
       response.statusCode = HttpStatus.forbidden;
       await response.close();
@@ -495,13 +620,16 @@ class LanServerService {
   }
 
   Future<void> _serveThumb(Uri uri, HttpResponse response) async {
-    final root = _folderById(uri.queryParameters['folder']);
-    if (root == null) {
+    final folder = _folderById(uri.queryParameters['folder']);
+    if (folder == null) {
       response.statusCode = HttpStatus.notFound;
       await response.close();
       return;
     }
-    final fullPath = _resolveWithin(root, uri.queryParameters['id'] ?? '');
+    final fullPath = await _resolveImage(
+      folder,
+      uri.queryParameters['id'] ?? '',
+    );
     if (fullPath == null) {
       response.statusCode = HttpStatus.forbidden;
       await response.close();
@@ -594,11 +722,11 @@ class LanServerService {
       return;
     }
 
-    final root = _folderById(uri.queryParameters['folder']);
-    final fullPath = root == null
+    final folder = _folderById(uri.queryParameters['folder']);
+    final fullPath = folder == null
         ? null
-        : _resolveWithin(root, uri.queryParameters['id'] ?? '');
-    if (root == null || fullPath == null) {
+        : await _resolveImage(folder, uri.queryParameters['id'] ?? '');
+    if (folder == null || fullPath == null) {
       response.statusCode = HttpStatus.notFound;
       await response.close();
       return;
@@ -610,11 +738,11 @@ class LanServerService {
       return;
     }
 
-    // 只允许排除该共享目录中确实存在的图片
-    final images = await _imagesForPath(root);
-    final relative = _relativeTo(root, fullPath);
+    // 只允许排除该共享条目中确实存在的图片
+    final images = await _imagesForFolder(folder);
+    final normalized = fullPath.replaceAll('\\', '/');
     final exists = images.any(
-      (item) => _relativeTo(root, item.path) == relative,
+      (item) => item.path.replaceAll('\\', '/') == normalized,
     );
     if (!exists) {
       response.statusCode = HttpStatus.notFound;
@@ -628,8 +756,12 @@ class LanServerService {
         : fullPath;
     _onExcludedPath?.call(storedPath);
     // 排除后目录与排序缓存失效，后续列表立即反映结果
-    _folderCache.remove(root);
-    _sortCache.removeWhere((key, _) => key.startsWith('$root|'));
+    for (final path in folder.paths) {
+      _folderCache.remove(path);
+      _sortCache.removeWhere((key, _) => key.startsWith('$path|'));
+    }
+    _sortCache.removeWhere((key, _) => key.startsWith('${folder.id}|'));
+    _idPathCache.clear();
     await _writeJson(response, {'ok': true});
   }
 
@@ -638,16 +770,6 @@ class LanServerService {
     response.headers.contentType = ContentType.json;
     response.write(jsonEncode(data));
     await response.close();
-  }
-
-  /// 根据稳定标识查找共享目录
-  String? _folderById(String? id) {
-    if (id == null || id.isEmpty) return null;
-    final paths = _folderPaths?.call() ?? const <String>[];
-    for (final path in paths) {
-      if (folderIdFor(path) == id) return path;
-    }
-    return null;
   }
 
   /// 为共享目录生成稳定标识。
@@ -676,6 +798,52 @@ class LanServerService {
     final normalized = path.replaceAll('\\', '/');
     final segments = normalized.split('/').where((e) => e.isNotEmpty).toList();
     return segments.isEmpty ? path : segments.last;
+  }
+
+  /// 生成图片在共享条目内的标识。
+  ///
+  /// 条目合并了多个同名相册时，不同相册内的相对路径可能相同，
+  /// 因此加目录序号前缀加以区分；单目录条目保持原有格式。
+  static String _idWithin(_SharedFolder folder, String path) {
+    if (folder.paths.length == 1) {
+      return _relativeTo(folder.paths.first, path);
+    }
+    final normalized = path.replaceAll('\\', '/');
+    for (var i = 0; i < folder.paths.length; i++) {
+      final root = folder.paths[i].replaceAll('\\', '/');
+      if (normalized.startsWith('$root/')) {
+        return '$i:${normalized.substring(root.length + 1)}';
+      }
+    }
+    return '0:${_relativeTo(folder.paths.first, path)}';
+  }
+
+  /// 把远端传入的图片标识解析成本机绝对路径，越界或不合法时返回 null
+  ///
+  /// 优先查列表接口同一套扫描结果生成的映射，保证「列出来的一定读得到」；
+  /// 未命中时再按旧的路径前缀规则兜底，兼容更早的客户端。
+  Future<String?> _resolveImage(_SharedFolder folder, String id) async {
+    if (id.isEmpty) return null;
+    final known = (await _idsForFolder(folder))[id];
+    if (known != null) return known;
+
+    final separator = folder.paths.length > 1 ? id.indexOf(':') : -1;
+    if (separator > 0) {
+      final index = int.tryParse(id.substring(0, separator));
+      if (index == null || index < 0 || index >= folder.paths.length) {
+        return null;
+      }
+      return _resolveWithin(folder.paths[index], id.substring(separator + 1));
+    }
+    // 兼容不带序号的旧标识：优先选择文件确实存在的目录
+    String? fallback;
+    for (final root in folder.paths) {
+      final resolved = _resolveWithin(root, id);
+      if (resolved == null) continue;
+      if (File(resolved).existsSync()) return resolved;
+      fallback ??= resolved;
+    }
+    return fallback;
   }
 
   /// 把远端传入的相对路径解析到共享目录内，越界时返回 null

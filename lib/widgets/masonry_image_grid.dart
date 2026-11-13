@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart'
 import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
+import 'package:frame_flow/utils/local_file_image.dart';
 
 /// 瀑布流网格组件：固定列宽，高度按图片宽高比自适应
 class MasonryImageGrid extends StatelessWidget {
@@ -110,8 +111,11 @@ class MasonryImageGrid extends StatelessWidget {
 
   /// 构造卡片使用的 [ImageProvider]，等价于
   /// `Image.file(File(path), cacheWidth: decodeWidthFor(context)).image`。
+  ///
+  /// 使用 [LocalFileImage] 而非 [FileImage]：缓存键带上文件的修改时间与大小，
+  /// 同名文件内容被替换后会重新解码，不会一直显示旧缩略图。
   static ImageProvider imageProviderFor(String path, BuildContext context) =>
-      ResizeImage(FileImage(File(path)), width: decodeWidthFor(context));
+      ResizeImage(LocalFileImage(File(path)), width: decodeWidthFor(context));
 
   /// 与 [imageProviderFor] 相同，但支持局域网远端图片（优先使用缩略图）。
   static ImageProvider imageProviderForItem(

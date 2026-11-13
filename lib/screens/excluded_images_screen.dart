@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:frame_flow/models/image_item.dart';
 import 'package:frame_flow/providers/settings_provider.dart';
+import 'package:frame_flow/services/copy_service.dart';
 import 'package:frame_flow/services/directory_picker_service.dart';
 import 'package:frame_flow/services/fullscreen_service.dart';
 import 'package:frame_flow/services/image_scan_service.dart';
@@ -185,10 +186,24 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
     final result = await _pickDestination();
     if (result == null) return;
     if (!mounted) return;
-    final ok = await MediaStoreService.moveFiles(result, [item.path]);
+    final loc = AppLocalizations.of(context);
+    final name = item.name;
+    final existing = await MediaStoreService.existingNames(result, {name});
+    if (!mounted) return;
+    final plan = await CopyService.resolveConflicts(
+      context,
+      title: loc.moveTo,
+      names: [name],
+      existing: existing,
+      batch: false,
+    );
+    if (!mounted || plan.cancelled || plan.skip.contains(name)) return;
+    final ok = await MediaStoreService.moveFiles(result, [
+      item.path,
+    ], overwriteNames: plan.replace);
     if (!mounted) return;
     if (!ok) {
-      _showSnack(AppLocalizations.of(context).moveFailed);
+      _showSnack(loc.moveFailed);
       return;
     }
     final settings = Provider.of<SettingsProvider>(context, listen: false);
@@ -201,12 +216,26 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
     final result = await _pickDestination();
     if (result == null) return;
     if (!mounted) return;
-    final ok = await MediaStoreService.copyFiles(result, [item.path]);
+    final loc = AppLocalizations.of(context);
+    final name = item.name;
+    final existing = await MediaStoreService.existingNames(result, {name});
+    if (!mounted) return;
+    final plan = await CopyService.resolveConflicts(
+      context,
+      title: loc.copyTo,
+      names: [name],
+      existing: existing,
+      batch: false,
+    );
+    if (!mounted || plan.cancelled || plan.skip.contains(name)) return;
+    final ok = await MediaStoreService.copyFiles(result, [
+      item.path,
+    ], overwriteNames: plan.replace);
     if (!mounted) return;
     if (ok) {
-      _showSnack(AppLocalizations.of(context).copySuccess);
+      _showSnack(loc.copySuccess);
     } else {
-      _showSnack(AppLocalizations.of(context).copyFailed);
+      _showSnack(loc.copyFailed);
     }
   }
 
@@ -248,19 +277,42 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
     if (result == null) return;
     if (!mounted) return;
     final items = List<ImageItem>.from(_excludedItems);
-    final ok = await MediaStoreService.moveFiles(
+    final loc = AppLocalizations.of(context);
+    final names = [for (final item in items) item.name];
+    final existing = await MediaStoreService.existingNames(
       result,
-      items.map((e) => e.path).toList(),
+      names.toSet(),
     );
     if (!mounted) return;
+    final plan = await CopyService.resolveConflicts(
+      context,
+      title: loc.moveTo,
+      names: names,
+      existing: existing,
+      batch: true,
+    );
+    if (!mounted || plan.cancelled) return;
+    final moving = [
+      for (var i = 0; i < items.length; i++)
+        if (!plan.skip.contains(names[i])) items[i],
+    ];
+    if (moving.isEmpty) return;
+    final ok = await MediaStoreService.moveFiles(result, [
+      for (final item in moving) item.path,
+    ], overwriteNames: plan.replace);
+    if (!mounted) return;
     if (!ok) {
-      _showSnack(AppLocalizations.of(context).moveFailed);
+      _showSnack(loc.moveFailed);
       return;
     }
+    final movedPaths = [for (final item in moving) item.path];
     final settings = Provider.of<SettingsProvider>(context, listen: false);
-    settings.removeExcludedPaths(items.map((e) => e.path).toList());
-    setState(() => _excludedItems.clear());
-    _showSnack(AppLocalizations.of(context).movedAllTo);
+    settings.removeExcludedPaths(movedPaths);
+    setState(
+      () =>
+          _excludedItems.removeWhere((item) => movedPaths.contains(item.path)),
+    );
+    _showSnack(loc.movedAllTo);
   }
 
   Future<void> _copyAll() async {
@@ -268,15 +320,34 @@ class _ExcludedImagesScreenState extends State<ExcludedImagesScreen> {
     if (result == null) return;
     if (!mounted) return;
     final items = List<ImageItem>.from(_excludedItems);
-    final ok = await MediaStoreService.copyFiles(
+    final loc = AppLocalizations.of(context);
+    final names = [for (final item in items) item.name];
+    final existing = await MediaStoreService.existingNames(
       result,
-      items.map((e) => e.path).toList(),
+      names.toSet(),
     );
     if (!mounted) return;
+    final plan = await CopyService.resolveConflicts(
+      context,
+      title: loc.copyTo,
+      names: names,
+      existing: existing,
+      batch: true,
+    );
+    if (!mounted || plan.cancelled) return;
+    final copying = [
+      for (var i = 0; i < items.length; i++)
+        if (!plan.skip.contains(names[i])) items[i],
+    ];
+    if (copying.isEmpty) return;
+    final ok = await MediaStoreService.copyFiles(result, [
+      for (final item in copying) item.path,
+    ], overwriteNames: plan.replace);
+    if (!mounted) return;
     if (ok) {
-      _showSnack(AppLocalizations.of(context).copiedAllTo);
+      _showSnack(loc.copiedAllTo);
     } else {
-      _showSnack(AppLocalizations.of(context).copyFailed);
+      _showSnack(loc.copyFailed);
     }
   }
 

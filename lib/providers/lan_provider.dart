@@ -230,9 +230,16 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
       final ids = {
         for (final folder in folders ?? const <RemoteFolder>[]) folder.id,
       };
+      // 手机端同名相册合并后标识可能变化，退回按文件夹名匹配
+      final names = {
+        for (final folder in folders ?? const <RemoteFolder>[])
+          folder.name.toLowerCase(),
+      };
       for (final ref in refs) {
         _folderReachable[ref.key] =
-            folders != null && ids.contains(ref.folderId);
+            folders != null &&
+            (ids.contains(ref.folderId) ||
+                names.contains(ref.folderName.toLowerCase()));
       }
     } finally {
       _probing.remove(deviceId);
@@ -303,6 +310,16 @@ class LanProvider extends ChangeNotifier with WidgetsBindingObserver {
           if (folder.id == ref.folderId) {
             match = folder;
             break;
+          }
+        }
+        // 手机端同名相册合并后标识可能变化，退回按文件夹名匹配，
+        // 保留原标识以免已保存的共享引用失效
+        if (match == null) {
+          for (final folder in folders) {
+            if (folder.name.toLowerCase() == ref.folderName.toLowerCase()) {
+              match = folder;
+              break;
+            }
           }
         }
       }

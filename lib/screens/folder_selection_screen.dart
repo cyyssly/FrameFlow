@@ -17,6 +17,7 @@ import 'package:frame_flow/screens/remote_browser_screen.dart';
 import 'package:frame_flow/services/directory_picker_service.dart';
 import 'package:frame_flow/services/image_scan_service.dart';
 import 'package:frame_flow/services/media_store_service.dart';
+import 'package:frame_flow/utils/local_file_image.dart';
 import 'package:frame_flow/l10n/app_localizations.dart';
 
 class FolderSelectionScreen extends StatefulWidget {
@@ -727,7 +728,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   }
 
   /// 把本地文件夹按条目归并：
-  /// - 移动端：所有同名的相册归为一个条目
+  /// - 移动端：所有同名的相册归为一个条目（名称仅大小写不同也视为同名）
   /// - 桌面端：一个路径一个条目
   List<_LocalFolderGroup> _groupLocalPaths(List<String> paths) {
     if (!Platform.isAndroid) {
@@ -737,11 +738,15 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
     }
     final byName = <String, List<String>>{};
     for (final path in paths) {
-      byName.putIfAbsent(_getLastPathSegment(path), () => []).add(path);
+      // 相册名不区分大小写，避免 Camera 与 camera 被拆成两条
+      byName
+          .putIfAbsent(_getLastPathSegment(path).toLowerCase(), () => [])
+          .add(path);
     }
     return [
       for (final entry in byName.entries)
-        _LocalFolderGroup(entry.key, entry.value),
+        // 展示名沿用组内第一个路径的真实写法
+        _LocalFolderGroup(_getLastPathSegment(entry.value.first), entry.value),
     ];
   }
 
@@ -1204,6 +1209,8 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
   }) {
     // 按父目录归组，并忽略应用外已被移走的文件
     final groups = <String, List<String>>{};
+    // 归并 key → 用于展示的名称（手机端为真实的目录名写法，桌面端为完整路径）
+    final displayNames = <String, String>{};
     final seen = <String>{};
     for (final path in settings.excludedPaths) {
       if (!File(path).existsSync()) continue;
@@ -1211,8 +1218,10 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
       if (!seen.add(path)) continue;
       final parent = _normalizeFolderPath(File(path).parent.path);
       // 手机端只按最后一级目录名归组：同名目录即使路径不同也视为同一目录，
-      // 避免出现两行同名但内容不同的分组
-      final key = Platform.isAndroid ? _getLastPathSegment(parent) : parent;
+      // 名称仅大小写不同也视为同名，避免出现多行同名但内容不同的分组
+      final name = _getLastPathSegment(parent);
+      final key = Platform.isAndroid ? name.toLowerCase() : parent;
+      displayNames.putIfAbsent(key, () => Platform.isAndroid ? name : parent);
       groups.putIfAbsent(key, () => []).add(path);
     }
     if (groups.isEmpty) return const [];
@@ -1235,7 +1244,7 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
         ],
       ),
       for (final entry in entries)
-        _buildExcludedGroupTile(entry.key, entry.value),
+        _buildExcludedGroupTile(displayNames[entry.key]!, entry.value),
     ];
   }
 
@@ -1971,8 +1980,9 @@ class _FolderSelectionScreenState extends State<FolderSelectionScreen>
         child: coverFile != null
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.file(
-                  File(coverFile),
+                child: Image(
+                  // 封面文件会被重新拉取覆盖，用带时间戳的键避免显示旧封面
+                  image: LocalFileImage(File(coverFile)),
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) =>
                       _sharedFolderIcon(online),

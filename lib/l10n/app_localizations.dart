@@ -420,6 +420,22 @@ class AppLocalizations {
   String get changeDestination => _t('更换目录', 'Change Folder', '更換目錄');
   String get startCopy => _t('开始复制', 'Start Copy', '開始複製');
   String get copyCancelled => _t('已取消复制', 'Copy cancelled', '已取消複製');
+  String get replaceFile => _t('替换', 'Replace', '取代');
+  String get skipFile => _t('跳过', 'Skip', '略過');
+  String get replaceAll => _t('全部替换', 'Replace All', '全部取代');
+  String get skipAll => _t('全部跳过', 'Skip All', '全部略過');
+  String get replaceThis => _t('替换本张', 'Replace This', '取代本張');
+  String get skipThis => _t('跳过本张', 'Skip This', '略過本張');
+  String conflictSingle(String name) => _t(
+    '目标位置已存在同名文件「$name」，是否替换？',
+    '"$name" already exists at the destination. Replace it?',
+    '目標位置已存在同名檔案「$name」，是否取代？',
+  );
+  String conflictBatch(int conflicts, int total) => _t(
+    '本次共 $total 张图片，其中 $conflicts 张在目标位置存在同名文件。',
+    '$conflicts of $total images already exist at the destination.',
+    '本次共 $total 張圖片，其中 $conflicts 張在目標位置存在同名檔案。',
+  );
   String copyingFiles(int done, int total) =>
       _t('正在复制 $done/$total', 'Copying $done/$total', '正在複製 $done/$total');
   String get deletedToTrash => _t('已移入回收站', 'Moved to trash', '已移入回收站');

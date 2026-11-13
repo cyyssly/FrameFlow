@@ -17,6 +17,7 @@ import 'package:frame_flow/services/copy_service.dart';
 import 'package:frame_flow/services/lan_client_service.dart';
 import 'package:frame_flow/services/fullscreen_service.dart';
 import 'package:frame_flow/services/media_store_service.dart';
+import 'package:frame_flow/utils/local_file_image.dart';
 import 'package:frame_flow/utils/rotated_fit.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -390,9 +391,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final destination = await CopyService.resolveDestination(context);
     if (!mounted || destination == null) return;
 
-    final ok = await CopyService.copyRemoteImage(item, destination);
-    if (!mounted) return;
     final loc = AppLocalizations.of(context);
+    final name = CopyService.fileNameFor(item);
+    final existing = await MediaStoreService.existingNames(destination, {name});
+    if (!mounted) return;
+    final plan = await CopyService.resolveConflicts(
+      context,
+      title: loc.copyTo,
+      names: [name],
+      existing: existing,
+      batch: false,
+    );
+    if (!mounted || plan.cancelled || plan.skip.contains(name)) return;
+
+    final ok = await CopyService.copyRemoteImage(
+      item,
+      destination,
+      overwrite: plan.replace.contains(name),
+    );
+    if (!mounted) return;
     _showDeleteNotification(ok ? loc.copySuccess : loc.copyFailed);
   }
 
@@ -1245,7 +1262,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final ImageProvider provider =
         item.isRemote && url != null && url.isNotEmpty
         ? NetworkImage(url)
-        : FileImage(File(item.path));
+        // 带上修改时间/大小，文件被同名替换后不会命中旧解码缓存
+        : LocalFileImage(File(item.path));
     final settings = Provider.of<SettingsProvider>(context, listen: false);
     if (settings.imageFitMode == ImageFitMode.original) return provider;
 

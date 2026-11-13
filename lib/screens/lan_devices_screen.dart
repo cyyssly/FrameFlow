@@ -12,6 +12,20 @@ import 'package:frame_flow/providers/slide_provider.dart';
 /// 提示类信息的统一强调色
 const Color _hintColor = Color(0xFFfdcb6e);
 
+/// 归并后的共享文件夹条目。
+///
+/// 移动端把所有同名的相册路径合并成一个条目统一管理；桌面端每个路径
+/// 各自成为一个条目。
+class _ShareFolderGroup {
+  /// 展示名称：移动端为最后一级目录名，桌面端为完整路径
+  final String name;
+
+  /// 该条目实际包含的文件夹路径
+  final List<String> paths;
+
+  const _ShareFolderGroup(this.name, this.paths);
+}
+
 /// 局域网共享页：只负责把本机已选文件夹共享给其他设备。
 ///
 /// 添加其他设备的共享文件夹入口在「选择文件夹」页的“添加共享源”。
@@ -89,9 +103,9 @@ class _LanDevicesScreenState extends State<LanDevicesScreen> {
               ),
             ),
           ),
-          for (final path in slide.folderPaths)
+          for (final group in _groupFolderPaths(slide.folderPaths))
             SwitchListTile(
-              key: ValueKey('share-$path'),
+              key: ValueKey('share-${group.paths.join('|')}'),
               // 与上方卡片开关使用同一水平内边距，保证开关竖向对齐
               contentPadding: const EdgeInsets.symmetric(horizontal: 16),
               secondary: const Icon(
@@ -99,7 +113,7 @@ class _LanDevicesScreenState extends State<LanDevicesScreen> {
                 color: Color(0xFF0984e3),
               ),
               title: Text(
-                Platform.isAndroid ? _lastSegment(path) : path,
+                group.name,
                 style: const TextStyle(fontSize: 14),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -108,8 +122,13 @@ class _LanDevicesScreenState extends State<LanDevicesScreen> {
                 style: const TextStyle(fontSize: 11, color: Colors.grey),
               ),
               activeThumbColor: const Color(0xFFe94560),
-              value: settings.isLocalFolderShared(path),
-              onChanged: (value) => settings.setLocalFolderShared(path, value),
+              // 同名条目只要有一个路径未共享，就视为未整体开启
+              value: group.paths.every(settings.isLocalFolderShared),
+              onChanged: (value) {
+                for (final path in group.paths) {
+                  settings.setLocalFolderShared(path, value);
+                }
+              },
             ),
         ],
       ),
@@ -210,6 +229,27 @@ class _LanDevicesScreenState extends State<LanDevicesScreen> {
         ),
       ],
     );
+  }
+
+  /// 把共享文件夹按条目归并：
+  /// - 移动端：所有同名的相册归为一个条目（名称仅大小写不同也视为同名）
+  /// - 桌面端：一个路径一个条目
+  List<_ShareFolderGroup> _groupFolderPaths(List<String> paths) {
+    if (!Platform.isAndroid) {
+      return [
+        for (final path in paths) _ShareFolderGroup(path, [path]),
+      ];
+    }
+    final byName = <String, List<String>>{};
+    for (final path in paths) {
+      // 相册名不区分大小写，避免 Camera 与 camera 被拆成两条
+      byName.putIfAbsent(_lastSegment(path).toLowerCase(), () => []).add(path);
+    }
+    return [
+      for (final entry in byName.entries)
+        // 展示名沿用组内第一个路径的真实写法
+        _ShareFolderGroup(_lastSegment(entry.value.first), entry.value),
+    ];
   }
 
   static String _lastSegment(String path) {
